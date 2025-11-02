@@ -7,7 +7,7 @@ require_relative "capture"
 require_relative "call_tree"
 
 module Memory
-	module Tracker
+	module Profiler
 		# Periodic sampler for monitoring memory growth over time.
 		#
 		# Samples class allocation counts at regular intervals and detects potential memory leaks
@@ -19,7 +19,7 @@ module Memory
 			# Records allocation counts over time and detects sustained growth patterns
 			# that indicate potential memory leaks.
 			class Sample
-				# Create a new sample tracker for a class.
+				# Create a new sample profiler for a class.
 				#
 				# @parameter target [Class] The class being sampled.
 				# @parameter size [Integer] Initial object count.

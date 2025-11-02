@@ -3,7 +3,7 @@
 # Released under the MIT License.
 # Copyright, 2025, by Samuel Williams.
 
-require "memory/tracker/call_tree"
+require "memory/profiler/call_tree"
 
 Location = Struct.new(:path, :lineno, :label) do
 	def to_s
@@ -11,7 +11,7 @@ Location = Struct.new(:path, :lineno, :label) do
 	end
 end
 
-describe Memory::Tracker::CallTree do
+describe Memory::Profiler::CallTree do
 	let(:tree) {subject.new}
 	
 	with "#record" do

@@ -3,9 +3,9 @@
 # Released under the MIT License.
 # Copyright, 2025, by Samuel Williams.
 
-require "memory/tracker/capture"
+require "memory/profiler/capture"
 
-describe Memory::Tracker::Capture do
+describe Memory::Profiler::Capture do
 	let(:capture) {subject.new}
 	
 	with "#start" do

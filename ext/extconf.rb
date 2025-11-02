@@ -6,7 +6,7 @@
 
 require "mkmf"
 
-extension_name = "Memory_Tracker"
+extension_name = "Memory_Profiler"
 
 append_cflags(["-Wall", "-Wno-unknown-pragmas", "-std=c99"])
 
@@ -16,8 +16,8 @@ if ENV.key?("RUBY_DEBUG")
 	append_cflags(["-DRUBY_DEBUG", "-O0"])
 end
 
-$srcs = ["memory/tracker/tracker.c", "memory/tracker/capture.c"]
-$VPATH << "$(srcdir)/memory/tracker"
+$srcs = ["memory/profiler/profiler.c", "memory/profiler/capture.c"]
+$VPATH << "$(srcdir)/memory/profiler"
 
 # Check for required headers
 have_header("ruby/debug.h") or abort "ruby/debug.h is required"

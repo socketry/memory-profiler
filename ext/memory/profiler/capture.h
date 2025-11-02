@@ -5,5 +5,5 @@
 
 #include <ruby.h>
 
-void Init_Memory_Tracker_Capture(VALUE Memory_Tracker);
+void Init_Memory_Profiler_Capture(VALUE Memory_Profiler);
 

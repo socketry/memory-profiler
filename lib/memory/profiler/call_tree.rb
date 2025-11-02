@@ -4,7 +4,7 @@
 # Copyright, 2025, by Samuel Williams.
 
 module Memory
-	module Tracker
+	module Profiler
 		# Efficient tree structure for tracking allocation call paths.
 		# Each node represents a frame in the call stack, with counts of how many
 		# allocations occurred at this point in the call path.

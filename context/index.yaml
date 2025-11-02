@@ -3,10 +3,10 @@
 ---
 description: Efficient memory allocation tracking with call path analysis.
 metadata:
-  documentation_uri: https://socketry.github.io/memory-tracker/
-  source_code_uri: https://github.com/socketry/memory-tracker
+  documentation_uri: https://socketry.github.io/memory-profiler/
+  source_code_uri: https://github.com/socketry/memory-profiler
 files:
 - path: getting-started.md
   title: Getting Started
-  description: This guide explains how to use `memory-tracker` to detect and diagnose
+  description: This guide explains how to use `memory-profiler` to detect and diagnose
     memory leaks in Ruby applications.

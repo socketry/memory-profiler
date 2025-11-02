@@ -5,16 +5,16 @@
 # Copyright, 2025, by Samuel Williams.
 
 require_relative "../config/environment"
-require_relative "../lib/memory/tracker"
+require_relative "../lib/memory/profiler"
 
-puts "Memory::Tracker Example - Two Modes"
+puts "Memory::Profiler Example - Two Modes"
 puts "=" * 60
 
 # Mode 1: Count Only (Lightweight Monitoring)
 puts "\n=== MODE 1: Count Only (Minimal Overhead) ==="
 puts "-" * 60
 
-capture = Memory::Tracker::Capture.new
+capture = Memory::Profiler::Capture.new
 capture.track(Hash)   # No callback = just counts!
 capture.track(Array)
 capture.start
@@ -47,7 +47,7 @@ capture.clear
 puts "\n\n=== MODE 2: With Call Path Analysis ==="
 puts "-" * 60
 
-sampler = Memory::Tracker::Sampler.new(depth: 10)
+sampler = Memory::Profiler::Sampler.new(depth: 10)
 sampler.track_with_analysis(Hash)
 sampler.start
 

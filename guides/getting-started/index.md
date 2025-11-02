@@ -1,30 +1,30 @@
 # Getting Started
 
-This guide will help you get started with Memory::Tracker for tracking memory allocations and detecting memory leaks in your Ruby applications.
+This guide will help you get started with Memory::Profiler for tracking memory allocations and detecting memory leaks in your Ruby applications.
 
 ## Installation
 
 Add to your Gemfile:
 
 ``` ruby
-gem "memory-tracker"
+gem "memory-profiler"
 ```
 
 Or install directly:
 
 ``` bash
-gem install memory-tracker
+gem install memory-profiler
 ```
 
 ## Basic Usage - Count Only (Lightweight)
 
-The simplest way to use Memory::Tracker is to track live object counts without detailed call path analysis. This has minimal overhead and is perfect for monitoring memory growth.
+The simplest way to use Memory::Profiler is to track live object counts without detailed call path analysis. This has minimal overhead and is perfect for monitoring memory growth.
 
 ``` ruby
-require "memory/tracker"
+require "memory/profiler"
 
 # Create a capture instance
-capture = Memory::Tracker::Capture.new
+capture = Memory::Profiler::Capture.new
 
 # Add classes to track (count only - minimal overhead)
 capture.track(Hash)
@@ -57,16 +57,16 @@ capture.stop
 When you need to understand **where** objects are being allocated, use call path analysis to capture stack traces:
 
 ``` ruby
-require "memory/tracker"
+require "memory/profiler"
 
 # Start tracking with detailed call path analysis
-Memory::Tracker.track_with_analysis(Hash)
+Memory::Profiler.track_with_analysis(Hash)
 
 # Your code that might leak memory
 run_potentially_leaky_code
 
 # Analyze call paths (automatically built via callback during allocations!)
-stats = Memory::Tracker.stats(Hash)
+stats = Memory::Profiler.stats(Hash)
 
 puts "Live objects: #{stats[:live_count]}"
 puts "Total allocation sites: #{stats[:total_allocations]}"
@@ -77,7 +77,7 @@ stats[:top_paths].each do |path_data|
 end
 
 # Stop tracking
-Memory::Tracker.untrack(Hash)
+Memory::Profiler.untrack(Hash)
 ```
 
 ## Custom Callback Usage
@@ -86,10 +86,10 @@ For advanced use cases, you can provide custom callbacks to process allocations:
 
 ``` ruby
 # Create your own callback to process allocations
-tracker = Memory::Tracker::Instance.new(depth: 10)
+profiler = Memory::Profiler::Instance.new(depth: 10)
 
 # Track with custom callback
-capture = tracker.instance_variable_get(:@capture)
+capture = profiler.instance_variable_get(:@capture)
 capture.track(Hash) do |obj, klass|
 	# Callback decides when to capture caller_locations
 	locations = caller_locations(1, 5)
@@ -101,14 +101,14 @@ capture.track(Hash) do |obj, klass|
 end
 
 # Or use the built-in analysis
-tracker.track_with_analysis(Array)
+profiler.track_with_analysis(Array)
 
 # Get counts (always available, even for count-only tracking)
-puts "Live Hashes: #{tracker.count(Hash)}"
-puts "Live Arrays: #{tracker.count(Array)}"
+puts "Live Hashes: #{profiler.count(Hash)}"
+puts "Live Arrays: #{profiler.count(Array)}"
 
 # Get detailed stats (only for classes tracked with analysis)
-if stats = tracker.stats(Array)
+if stats = profiler.stats(Array)
 	puts "\nArray Analysis:"
 	puts "  Live: #{stats[:live_count]}"
 	puts "  Total sites: #{stats[:total_allocations]}"
@@ -120,18 +120,18 @@ if stats = tracker.stats(Array)
 end
 
 # Clean up
-tracker.stop!
+profiler.stop!
 ```
 
 ## Integration with Monitoring
 
-Here's an example of integrating Memory::Tracker with application monitoring:
+Here's an example of integrating Memory::Profiler with application monitoring:
 
 ``` ruby
 # In a Rack middleware or background job
 class MemoryMonitor
 	def initialize
-		@tracker = Memory::Tracker::Instance.new(depth: 10)
+		@profiler = Memory::Profiler::Instance.new(depth: 10)
 		@samples = {}
 	end
 	
@@ -150,13 +150,13 @@ class MemoryMonitor
 			
 			# After 10 increases, start detailed tracking
 			if sample[:increases] == 10
-				@tracker.track(klass)
+				@profiler.track(klass)
 				puts "Started tracking #{klass} allocations"
 			end
 			
 			# Report if we're tracking
-			if @tracker.tracking?(klass)
-				stats = @tracker.stats(klass)
+			if @profiler.tracking?(klass)
+				stats = @profiler.stats(klass)
 				report_leak(klass, stats)
 			end
 		end
@@ -179,7 +179,7 @@ end
 Perfect for monitoring memory growth with minimal overhead:
 
 ``` ruby
-capture = Memory::Tracker::Capture.new
+capture = Memory::Profiler::Capture.new
 
 # Just track counts (no callback = no caller_locations overhead!)
 capture.track(Hash)

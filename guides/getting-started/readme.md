@@ -1,23 +1,23 @@
 # Getting Started
 
-This guide explains how to use `memory-tracker` to detect and diagnose memory leaks in Ruby applications.
+This guide explains how to use `memory-profiler` to detect and diagnose memory leaks in Ruby applications.
 
 ## Installation
 
 Add the gem to your project:
 
 ~~~ bash
-$ bundle add memory-tracker
+$ bundle add memory-profiler
 ~~~
 
 ## Core Concepts
 
 Memory leaks happen when your application creates objects that should be garbage collected but remain referenced indefinitely. Over time, this causes memory usage to grow unbounded, eventually leading to performance degradation or out-of-memory crashes.
 
-`memory-tracker` helps you find memory leaks by tracking object allocations in real-time:
+`memory-profiler` helps you find memory leaks by tracking object allocations in real-time:
 
-- **{ruby Memory::Tracker::Capture}** monitors allocations using Ruby's internal NEWOBJ/FREEOBJ events.
-- **{ruby Memory::Tracker::CallTree}** aggregates allocation call paths to identify leak sources.
+- **{ruby Memory::Profiler::Capture}** monitors allocations using Ruby's internal NEWOBJ/FREEOBJ events.
+- **{ruby Memory::Profiler::CallTree}** aggregates allocation call paths to identify leak sources.
 - **No heap enumeration** - uses O(1) counters updated automatically by the VM.
 
 ## Usage
@@ -27,10 +27,10 @@ Memory leaks happen when your application creates objects that should be garbage
 Start by identifying which classes are accumulating objects:
 
 ~~~ ruby
-require 'memory/tracker'
+require 'memory/profiler'
 
 # Create a capture instance:
-capture = Memory::Tracker::Capture.new
+capture = Memory::Profiler::Capture.new
 
 # Start tracking all object allocations:
 capture.start
@@ -54,7 +54,7 @@ Once you've identified a leaking class, use call path analysis to find WHERE all
 
 ~~~ ruby
 # Create a sampler with call path analysis:
-sampler = Memory::Tracker::Sampler.new(depth: 10)
+sampler = Memory::Profiler::Sampler.new(depth: 10)
 
 # Track the leaking class with analysis:
 sampler.track_with_analysis(Hash)
@@ -83,10 +83,10 @@ sampler.stop
 Let's say you notice your app's memory growing over time. Here's how to diagnose it:
 
 ~~~ ruby
-require 'memory/tracker'
+require 'memory/profiler'
 
 # Setup monitoring:
-capture = Memory::Tracker::Capture.new
+capture = Memory::Profiler::Capture.new
 capture.start
 
 # Take baseline measurement:
@@ -124,7 +124,7 @@ If Hashes grew significantly, enable detailed tracking:
 
 ~~~ ruby
 # Create detailed sampler:
-sampler = Memory::Tracker::Sampler.new(depth: 15)
+sampler = Memory::Profiler::Sampler.new(depth: 15)
 sampler.track_with_analysis(Hash)
 sampler.start
 
@@ -185,7 +185,7 @@ capture.start
 
 ~~~ ruby
 # Monitor your cache class:
-capture = Memory::Tracker::Capture.new
+capture = Memory::Profiler::Capture.new
 capture.start
 
 cache_baseline = capture.count_for(CacheEntry)
@@ -205,7 +205,7 @@ end
 
 ~~~ ruby
 # Track during request processing:
-sampler = Memory::Tracker::Sampler.new
+sampler = Memory::Profiler::Sampler.new
 sampler.track_with_analysis(Hash)
 sampler.start
 

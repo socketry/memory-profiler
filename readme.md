@@ -1,8 +1,8 @@
-# Memory::Tracker
+# Memory::Profiler
 
 Efficient memory allocation tracking focused on **retained objects only**. Automatically tracks allocations and cleans up when objects are freed, giving you precise data on memory leaks.
 
-[![Development Status](https://github.com/socketry/memory-tracker/workflows/Test/badge.svg)](https://github.com/socketry/memory-tracker/actions?workflow=Test)
+[![Development Status](https://github.com/socketry/memory-profiler/workflows/Test/badge.svg)](https://github.com/socketry/memory-profiler/actions?workflow=Test)
 
 ## Features
 
@@ -14,13 +14,13 @@ Efficient memory allocation tracking focused on **retained objects only**. Autom
 
 ## Usage
 
-Please see the [project documentation](https://socketry.github.io/memory-tracker/) for more details.
+Please see the [project documentation](https://socketry.github.io/memory-profiler/) for more details.
 
-  - [Getting Started](https://socketry.github.io/memory-tracker/guides/getting-started/index) - This guide explains how to use `memory-tracker` to detect and diagnose memory leaks in Ruby applications.
+  - [Getting Started](https://socketry.github.io/memory-profiler/guides/getting-started/index) - This guide explains how to use `memory-profiler` to detect and diagnose memory leaks in Ruby applications.
 
 ## Releases
 
-Please see the [project releases](https://socketry.github.io/memory-tracker/releases/index) for all releases.
+Please see the [project releases](https://socketry.github.io/memory-profiler/releases/index) for all releases.
 
 ### v0.1.0
 
