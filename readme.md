@@ -22,7 +22,7 @@ Please see the [project documentation](https://socketry.github.io/memory-tracker
 
 Please see the [project releases](https://socketry.github.io/memory-tracker/releases/index) for all releases.
 
-### Unreleased
+### v0.1.0
 
   - Initial implementation.
 
