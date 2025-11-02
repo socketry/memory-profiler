@@ -14,22 +14,42 @@ module Memory
 			# Each node tracks how many allocations occurred at a specific point in a call path.
 			# Nodes form a tree structure where each path from root to leaf represents a unique
 			# call stack that led to allocations.
+			#
+			# Nodes now track both total allocations and currently retained (live) allocations.
 			class Node
 				# Create a new call tree node.
 				#
 				# @parameter location [Thread::Backtrace::Location] The source location for this frame.
-				def initialize(location = nil)
+				# @parameter parent [Node] The parent node in the tree.
+				def initialize(location = nil, parent = nil)
 					@location = location
-					@count = 0
+					@parent = parent
+					@total_count = 0      # Total allocations (never decrements)
+					@retained_count = 0   # Current live objects (decrements on free)
 					@children = nil
 				end
 				
 				# @attribute [Thread::Backtrace::Location] The location of the call.
-				attr_reader :location, :count, :children
+				attr_reader :location, :parent, :children
+				attr_accessor :total_count, :retained_count
 				
-				# Increment the allocation count for this node.
-				def increment!
-					@count += 1
+				# Increment both total and retained counts up the entire path to root.
+				def increment_path!
+					current = self
+					while current
+						current.total_count += 1
+						current.retained_count += 1
+						current = current.parent
+					end
+				end
+				
+				# Decrement retained count up the entire path to root.
+				def decrement_path!
+					current = self
+					while current
+						current.retained_count -= 1
+						current = current.parent
+					end
 				end
 				
 				# Check if this node is a leaf (end of a call path).
@@ -45,7 +65,7 @@ module Memory
 				# @returns [Node] The child node for this location.
 				def find_or_create_child(location)
 					@children ||= {}
-					@children[location.to_s] ||= Node.new(location)
+					@children[location.to_s] ||= Node.new(location, self)
 				end
 				
 				# Iterate over child nodes.
@@ -56,11 +76,14 @@ module Memory
 				end
 				
 				# Enumerate all paths from this node to leaves with their counts
+				#
+				# @parameter prefix [Array] The path prefix (nodes traversed so far).
+				# @yields {|path, total_count, retained_count| ...} For each leaf path.
 				def each_path(prefix = [], &block)
 					current = prefix + [self]
 					
 					if leaf?
-						yield current, @count
+						yield current, @total_count, @retained_count
 					end
 					
 					@children&.each_value do |child|
@@ -74,47 +97,73 @@ module Memory
 				@root = Node.new
 			end
 			
-			# Record an allocation with the given caller locations
+			# Record an allocation with the given caller locations.
+			#
+			# @parameter caller_locations [Array<Thread::Backtrace::Location>] The call stack.
+			# @returns [Node] The leaf node representing this allocation path.
 			def record(caller_locations)
-				return if caller_locations.empty?
+				return nil if caller_locations.empty?
 				
 				current = @root
 				
-				# Build tree, incrementing each node as we traverse:
+				# Build tree path from root to leaf:
 				caller_locations.each do |location|
-					current.increment!
 					current = current.find_or_create_child(location)
 				end
 				
-				# Increment the final leaf node:
-				current.increment!
+				# Increment counts for entire path (from leaf back to root):
+				current.increment_path!
+				
+				# Return leaf node for object tracking:
+				current
 			end
 			
-			# Get the top N call paths by allocation count
-			def top_paths(limit = 10)
+			# Get the top N call paths by allocation count.
+			#
+			# @parameter limit [Integer] Maximum number of paths to return.
+			# @parameter by [Symbol] Sort by :total or :retained count.
+			# @returns [Array<Array>] Array of [locations, total_count, retained_count].
+			def top_paths(limit = 10, by: :retained)
 				paths = []
 				
-				@root.each_path do |path, count|
+				@root.each_path do |path, total_count, retained_count|
 					# Filter out root node (has nil location) and map to location strings
 					locations = path.select(&:location).map {|node| node.location.to_s}
-					paths << [locations, count] unless locations.empty?
+					paths << [locations, total_count, retained_count] unless locations.empty?
 				end
 				
-				paths.sort_by {|_, count| -count}.first(limit)
+				# Sort by the requested metric (default: retained, since that's what matters for leaks)
+				sort_index = (by == :total) ? 1 : 2
+				paths.sort_by {|path_data| -path_data[sort_index]}.first(limit)
 			end
 			
-			# Get hotspot locations (individual frames with highest counts)
-			def hotspots(limit = 20)
-				frames = Hash.new(0)
+			# Get hotspot locations (individual frames with highest counts).
+			#
+			# @parameter limit [Integer] Maximum number of hotspots to return.
+			# @parameter by [Symbol] Sort by :total or :retained count.
+			# @returns [Hash] Map of location => [total_count, retained_count].
+			def hotspots(limit = 20, by: :retained)
+				frames = Hash.new {|h, k| h[k] = [0, 0]}
 				
 				collect_frames(@root, frames)
 				
-				frames.sort_by {|_, count| -count}.first(limit).to_h
+				# Sort by the requested metric
+				sort_index = (by == :total) ? 0 : 1
+				frames.sort_by {|_, counts| -counts[sort_index]}.first(limit).to_h
 			end
 			
-			# Total number of allocations tracked
+			# Total number of allocations tracked.
+			#
+			# @returns [Integer] Total allocation count.
 			def total_allocations
-				@root.instance_variable_get(:@count)
+				@root.total_count
+			end
+			
+			# Number of currently retained (live) allocations.
+			#
+			# @returns [Integer] Retained allocation count.
+			def retained_allocations
+				@root.retained_count
 			end
 			
 			# Clear all tracking data
@@ -122,12 +171,14 @@ module Memory
 				@root = Node.new
 			end
 			
-			private
+		private
 			
 			def collect_frames(node, frames)
 				# Skip root node (has no location)
 				if node.location
-					frames[node.location.to_s] += node.count
+					location_str = node.location.to_s
+					frames[location_str][0] += node.total_count
+					frames[location_str][1] += node.retained_count
 				end
 				
 				node.each_child {|child| collect_frames(child, frames)}

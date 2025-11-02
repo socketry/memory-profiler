@@ -68,7 +68,9 @@ describe Memory::Tracker::CallTree do
 			
 			# Should have deduped the common root "a.rb:1"
 			hotspots = tree.hotspots(10)
-			expect(hotspots[a_rb.to_s]).to be == 15  # Both paths share this
+			total, retained = hotspots[a_rb.to_s]
+			expect(total).to be == 15  # Both paths share this
+			expect(retained).to be == 15  # All retained (no frees)
 		end
 	end
 	
@@ -84,8 +86,11 @@ describe Memory::Tracker::CallTree do
 			
 			paths = tree.top_paths(10)
 			
-			expect(paths.first[1]).to be == 10  # Top path has 10 allocations
-			expect(paths.last[1]).to be == 5     # Second path has 5
+			# top_paths now returns [locations, total_count, retained_count]
+			expect(paths.first[1]).to be == 10  # Top path has 10 total allocations
+			expect(paths.first[2]).to be == 10  # Top path has 10 retained
+			expect(paths.last[1]).to be == 5    # Second path has 5 total
+			expect(paths.last[2]).to be == 5    # Second path has 5 retained
 		end
 	end
 	
@@ -103,8 +108,13 @@ describe Memory::Tracker::CallTree do
 			end
 			
 			hotspots = tree.hotspots(10)
-			expect(hotspots[a_rb.to_s]).to be == 3
-			expect(hotspots[b_rb.to_s]).to be == 2
+			total_a, retained_a = hotspots[a_rb.to_s]
+			total_b, retained_b = hotspots[b_rb.to_s]
+			
+			expect(total_a).to be == 3
+			expect(retained_a).to be == 3
+			expect(total_b).to be == 2
+			expect(retained_b).to be == 2
 		end
 	end
 	
@@ -115,6 +125,56 @@ describe Memory::Tracker::CallTree do
 			
 			tree.clear!
 			expect(tree.total_allocations).to be == 0
+		end
+	end
+	
+	with "dual counters" do
+		it "tracks both total and retained allocations" do
+			location = Location.new("a.rb", 1, "foo")
+			
+			# Record 5 allocations
+			nodes = 5.times.map do
+				tree.record([location])
+			end
+			
+			expect(tree.total_allocations).to be == 5
+			expect(tree.retained_allocations).to be == 5
+			
+			# Simulate 2 objects being freed
+			2.times do |i|
+				nodes[i].decrement_path!
+			end
+			
+			# Total should stay the same, retained should decrease
+			expect(tree.total_allocations).to be == 5
+			expect(tree.retained_allocations).to be == 3
+		end
+		
+		it "decrements through entire path" do
+			location1 = Location.new("a.rb", 1, "foo")
+			location2 = Location.new("b.rb", 2, "bar")
+			
+			# Create nested path
+			node = tree.record([location1, location2])
+			
+			expect(tree.total_allocations).to be == 1
+			expect(tree.retained_allocations).to be == 1
+			
+			# Decrement - should affect entire path
+			node.decrement_path!
+			
+			expect(tree.total_allocations).to be == 1
+			expect(tree.retained_allocations).to be == 0
+			
+			# Verify hotspots show the decrement
+			hotspots = tree.hotspots(10)
+			location1_total, location1_retained = hotspots[location1.to_s]
+			location2_total, location2_retained = hotspots[location2.to_s]
+			
+			expect(location1_total).to be == 1
+			expect(location1_retained).to be == 0
+			expect(location2_total).to be == 1
+			expect(location2_retained).to be == 0
 		end
 	end
 end

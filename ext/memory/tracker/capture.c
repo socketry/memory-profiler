@@ -16,12 +16,20 @@ enum {
 static VALUE Memory_Tracker_Capture = Qnil;
 static VALUE Memory_Tracker_Allocations = Qnil;
 
+// Event symbols
+static VALUE sym_newobj;
+static VALUE sym_freeobj;
+
 // Per-class allocation tracking record
 struct Memory_Tracker_Capture_Allocations {
 	VALUE callback;   // Optional Ruby proc/lambda to call on allocation
 	size_t new_count;  // Total allocations seen since tracking started
 	size_t free_count; // Total frees seen since tracking started
 	// Live count = new_count - free_count
+	
+	// For detailed tracking: map object (VALUE) => state (VALUE)
+	// State is returned from callback on :newobj and passed back on :freeobj
+	st_table *object_states;
 };
 
 // Main capture state
@@ -33,15 +41,31 @@ struct Memory_Tracker_Capture {
 	int enabled;
 };
 
+// Helper to mark object_states table values
+static int Memory_Tracker_Capture_mark_state(st_data_t key, st_data_t value, st_data_t arg) {
+	// key is VALUE (object) - don't mark it, we're just using it as a key
+	// value is VALUE (state) - mark it as movable
+	rb_gc_mark_movable((VALUE)value);
+	return ST_CONTINUE;
+}
+
 // GC mark callback for tracked_classes table
 static int Memory_Tracker_Capture_mark_class(st_data_t key, st_data_t value, st_data_t arg) {
+	VALUE klass = (VALUE)key;
+	
 	// Mark class as un-movable as we don't want it moving in freeobj.
-	rb_gc_mark((VALUE)key);
+	rb_gc_mark(klass);
 	
 	struct Memory_Tracker_Capture_Allocations *record = (struct Memory_Tracker_Capture_Allocations *)value;
 	if (!NIL_P(record->callback)) {
 		rb_gc_mark_movable(record->callback);  // Mark callback as movable
 	}
+	
+	// Mark object_states table if it exists
+	if (record->object_states) {
+		st_foreach(record->object_states, Memory_Tracker_Capture_mark_state, 0);
+	}
+	
 	return ST_CONTINUE;
 }
 
@@ -61,6 +85,9 @@ static void Memory_Tracker_Capture_mark(void *ptr) {
 // Iterator to free each class record
 static int Memory_Tracker_Capture_free_class_record(st_data_t key, st_data_t value, st_data_t arg) {
 	struct Memory_Tracker_Capture_Allocations *record = (struct Memory_Tracker_Capture_Allocations *)value;
+	if (record->object_states) {
+		st_free_table(record->object_states);
+	}
 	xfree(record);
 	return ST_CONTINUE;
 }
@@ -157,7 +184,7 @@ const char *event_flag_name(rb_event_flag_t event_flag) {
 }
 
 // Handler for NEWOBJ event
-static void Memory_Tracker_Capture_newobj_handler(struct Memory_Tracker_Capture *capture, VALUE klass) {
+static void Memory_Tracker_Capture_newobj_handler(struct Memory_Tracker_Capture *capture, VALUE klass, VALUE object) {
 	st_data_t record_data;
 	if (st_lookup(capture->tracked_classes, (st_data_t)klass, &record_data)) {
 		struct Memory_Tracker_Capture_Allocations *record = (struct Memory_Tracker_Capture_Allocations *)record_data;
@@ -170,7 +197,17 @@ static void Memory_Tracker_Capture_newobj_handler(struct Memory_Tracker_Capture 
 			// - Must NOT block/sleep (stalls all allocations system-wide)
 			// - Should NOT raise exceptions (will propagate to allocating code)
 			// - Avoid allocating objects (causes re-entry)
-			rb_funcall(record->callback, rb_intern("call"), 1, klass);
+			
+			// Call with (klass, :newobj, nil) - callback returns state to store
+			VALUE state = rb_funcall(record->callback, rb_intern("call"), 3, klass, sym_newobj, Qnil);
+			
+			// Store the state if callback returned something
+			if (!NIL_P(state)) {
+				if (!record->object_states) {
+					record->object_states = st_init_numtable();
+				}
+				st_insert(record->object_states, (st_data_t)object, (st_data_t)state);
+			}
 		}
 	} else {
 		// Create record for this class (first time seeing it)
@@ -178,16 +215,26 @@ static void Memory_Tracker_Capture_newobj_handler(struct Memory_Tracker_Capture 
 		record->callback = Qnil;
 		record->new_count = 1;  // This is the first allocation
 		record->free_count = 0;
+		record->object_states = NULL;
 		st_insert(capture->tracked_classes, (st_data_t)klass, (st_data_t)record);
 	}
 }
 
 // Handler for FREEOBJ event
-static void Memory_Tracker_Capture_freeobj_handler(struct Memory_Tracker_Capture *capture, VALUE klass) {
+static void Memory_Tracker_Capture_freeobj_handler(struct Memory_Tracker_Capture *capture, VALUE klass, VALUE object) {
 	st_data_t record_data;
 	if (st_lookup(capture->tracked_classes, (st_data_t)klass, &record_data)) {
 		struct Memory_Tracker_Capture_Allocations *record = (struct Memory_Tracker_Capture_Allocations *)record_data;
 		record->free_count++;
+		if (!NIL_P(record->callback) && record->object_states) {
+			// Look up state stored during NEWOBJ
+			st_data_t state_data;
+			if (st_delete(record->object_states, (st_data_t *)&object, &state_data)) {
+				VALUE state = (VALUE)state_data;
+				// Call with (klass, :freeobj, state)
+				rb_funcall(record->callback, rb_intern("call"), 3, klass, sym_freeobj, state);
+			}
+		}
 	}
 }
 
@@ -252,10 +299,10 @@ static void Memory_Tracker_Capture_event_callback(VALUE data, void *ptr) {
 	
 	if (event_flag == RUBY_INTERNAL_EVENT_NEWOBJ) {
 		// self is the newly allocated object
-		Memory_Tracker_Capture_newobj_handler(capture, klass);
+		Memory_Tracker_Capture_newobj_handler(capture, klass, object);
 	} else if (event_flag == RUBY_INTERNAL_EVENT_FREEOBJ) {
 		// self is the object being freed
-		Memory_Tracker_Capture_freeobj_handler(capture, klass);
+		Memory_Tracker_Capture_freeobj_handler(capture, klass, object);
 	}
 }
 
@@ -332,13 +379,18 @@ static VALUE Memory_Tracker_Capture_track(int argc, VALUE *argv, VALUE self) {
 	st_data_t record_data;
 	if (st_lookup(capture->tracked_classes, (st_data_t)klass, &record_data)) {
 		struct Memory_Tracker_Capture_Allocations *record = (struct Memory_Tracker_Capture_Allocations *)record_data;
-		record->callback = callback;
+		RB_OBJ_WRITE(self, &record->callback, callback);
 	} else {
 		struct Memory_Tracker_Capture_Allocations *record = ALLOC(struct Memory_Tracker_Capture_Allocations);
-		record->callback = callback;
+		record->callback = callback;  // Initial assignment, no write barrier needed
 		record->new_count = 0;
 		record->free_count = 0;
+		record->object_states = NULL;
 		st_insert(capture->tracked_classes, (st_data_t)klass, (st_data_t)record);
+		// Now inform GC about the callback reference
+		if (!NIL_P(callback)) {
+			RB_OBJ_WRITTEN(self, Qnil, callback);
+		}
 	}
 	
 	return self;
@@ -393,6 +445,13 @@ static int Memory_Tracker_Capture_reset_class(st_data_t key, st_data_t value, st
 	record->new_count = 0;   // Reset allocation count
 	record->free_count = 0;  // Reset free count
 	record->callback = Qnil; // Clear callback
+	
+	// Clear object states
+	if (record->object_states) {
+		st_free_table(record->object_states);
+		record->object_states = NULL;
+	}
+	
 	return ST_CONTINUE;
 }
 
@@ -407,10 +466,10 @@ static VALUE Memory_Tracker_Capture_clear(VALUE self) {
 	return self;
 }
 
-// TypedData for Allocations wrapper
+// TypedData for Allocations wrapper - just wraps the record pointer
 static const rb_data_type_t Memory_Tracker_Allocations_type = {
 	"Memory::Tracker::Allocations",
-	{NULL, NULL, NULL},  // No mark/free needed - just a reference wrapper
+	{NULL, NULL, NULL},  // No mark/free needed - record is owned by Capture
 	0, 0, 0
 };
 
@@ -453,7 +512,8 @@ static VALUE Memory_Tracker_Allocations_track(int argc, VALUE *argv, VALUE self)
 	VALUE callback;
 	rb_scan_args(argc, argv, "&", &callback);
 	
-	record->callback = callback;
+	// Use write barrier - self (Allocations wrapper) keeps Capture alive, which keeps callback alive
+	RB_OBJ_WRITE(self, &record->callback, callback);
 	
 	return self;
 }
@@ -486,6 +546,12 @@ static VALUE Memory_Tracker_Capture_each(VALUE self) {
 
 void Init_Memory_Tracker_Capture(VALUE Memory_Tracker)
 {
+	// Initialize event symbols
+	sym_newobj = ID2SYM(rb_intern("newobj"));
+	sym_freeobj = ID2SYM(rb_intern("freeobj"));
+	rb_gc_register_mark_object(sym_newobj);
+	rb_gc_register_mark_object(sym_freeobj);
+	
 	Memory_Tracker_Capture = rb_define_class_under(Memory_Tracker, "Capture", rb_cObject);
 	rb_define_alloc_func(Memory_Tracker_Capture, Memory_Tracker_Capture_alloc);
 	

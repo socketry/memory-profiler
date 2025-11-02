@@ -79,17 +79,23 @@ statistics = sampler.statistics(Hash)
 if statistics
 	puts "\nHash Allocation Analysis:"
 	puts "  Live objects: #{statistics[:live_count]}"
-	puts "  Total allocation sites: #{statistics[:total_allocations]}"
+	puts "  Total allocations: #{statistics[:total_allocations]}"
+	puts "  Retained allocations: #{statistics[:retained_allocations]}"
 	
-	puts "\n  Top Call Paths:"
+	puts "\n  Top Call Paths (by retained count):"
 	statistics[:top_paths].first(5).each_with_index do |path_data, i|
-		puts "\n  #{i + 1}. #{path_data[:count]} allocations:"
+		total = path_data[:total_count]
+		retained = path_data[:retained_count]
+		puts "\n  #{i + 1}. Total: #{total}, Retained: #{retained} (#{(retained * 100.0 / total).round(1)}% kept)"
 		path_data[:path].first(3).each {|frame| puts "       #{frame}"}
 	end
 	
-	puts "\n  Hotspot Frames:"
-	statistics[:hotspots].first(5).each do |location, count|
-		puts "    #{location}: #{count}"
+	puts "\n  Hotspot Frames (by retained count):"
+	statistics[:hotspots].first(5).each do |location, counts|
+		total = counts[:total_count]
+		retained = counts[:retained_count]
+		puts "    #{location}"
+		puts "      Total: #{total}, Retained: #{retained} (#{(retained * 100.0 / total).round(1)}% kept)"
 	end
 end
 

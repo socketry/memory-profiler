@@ -156,12 +156,28 @@ module Memory
 				depth = @depth
 				filter = @filter
 				
-				# Register callback on allocations object
-				allocations.track do |obj_klass|
-					# Callback captures caller_locations with desired depth
-					locations = caller_locations(1, depth)
-					filtered = locations.select(&filter)
-					tree.record(filtered) unless filtered.empty?
+				# Register callback on allocations object with new signature:
+				# - On :newobj - returns state (leaf node) which C extension stores
+				# - On :freeobj - receives state back from C extension
+				allocations.track do |klass, event, state|
+					case event
+					when :newobj
+						# Capture call stack and record in tree
+						locations = caller_locations(1, depth)
+						filtered = locations.select(&filter)
+						unless filtered.empty?
+							# Record returns the leaf node - return it so C can store it
+							tree.record(filtered)
+						end
+						# Return nil or the node - C will store whatever we return
+					when :freeobj
+						# Decrement using the state (leaf node) passed back from C
+						if state
+							state.decrement_path!
+						end
+					end
+				rescue Exception => error
+					warn "Error in track_with_analysis_internal: #{error.message}\n#{error.backtrace.join("\n")}"
 				end
 			end
 			
@@ -212,6 +228,9 @@ module Memory
 			end
 			
 			# Get allocation statistics for a tracked class.
+			#
+			# @parameter klass [Class] The class to get statistics for.
+			# @returns [Hash] Statistics including total, retained, paths, and hotspots.
 			def statistics(klass)
 				tree = @call_trees[klass]
 				return nil unless tree
@@ -219,10 +238,13 @@ module Memory
 				{
 					live_count: @capture.count_for(klass),
 					total_allocations: tree.total_allocations,
-					top_paths: tree.top_paths(10).map {|path, count| 
-						{ path: path, count: count }
+					retained_allocations: tree.retained_allocations,
+					top_paths: tree.top_paths(10).map {|path, total, retained| 
+						{ path: path, total_count: total, retained_count: retained }
 					},
-					hotspots: tree.hotspots(20)
+					hotspots: tree.hotspots(20).transform_values {|total, retained|
+						{ total_count: total, retained_count: retained }
+					}
 				}
 			end
 			

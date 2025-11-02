@@ -103,10 +103,10 @@ describe Memory::Tracker::Capture do
 	
 	with "callback" do
 		it "calls callback on allocation" do
-			captured_objects = []
+			captured_classes = []
 			
-			capture.track(Hash) do |klass|
-				captured_objects << klass
+			capture.track(Hash) do |klass, event, state|
+				captured_classes << klass if event == :newobj
 			end
 			
 			capture.start
@@ -116,17 +116,17 @@ describe Memory::Tracker::Capture do
 			capture.stop
 			
 			# Should have captured the hash
-			expect(captured_objects.length).to be >= 1
+			expect(captured_classes.length).to be >= 1
 			
-			# Find our hash in the captured objects
-			found = captured_objects.any? {|klass| klass == Hash}
+			# Find our hash in the captured classes
+			found = captured_classes.any? {|klass| klass == Hash}
 			expect(found).to be == true
 		end
 		
 		it "does not call callback when not started" do
 			call_count = 0
 			
-			capture.track(Hash) do |obj, klass|
+			capture.track(Hash) do |klass, event, state|
 				call_count += 1
 			end
 			
@@ -139,9 +139,11 @@ describe Memory::Tracker::Capture do
 		it "callback can capture caller_locations" do
 			captured_locations = []
 			
-			capture.track(Hash) do |obj, klass|
-				locations = caller_locations(1, 3)
-				captured_locations << locations
+			capture.track(Hash) do |klass, event, state|
+				if event == :newobj
+					locations = caller_locations(1, 3)
+					captured_locations << locations
+				end
 			end
 			
 			capture.start
