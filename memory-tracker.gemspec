@@ -3,7 +3,7 @@
 require_relative "lib/memory/tracker/version"
 
 Gem::Specification.new do |spec|
-	spec.name = "memory-tracker"
+	spec.name = "memory-tracker-x"
 	spec.version = Memory::Tracker::VERSION
 	
 	spec.summary = "Efficient memory allocation tracking with call path analysis."
