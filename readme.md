@@ -22,6 +22,10 @@ Please see the [project documentation](https://socketry.github.io/memory-profile
 
 Please see the [project releases](https://socketry.github.io/memory-profiler/releases/index) for all releases.
 
+### v1.1.2
+
+    - Fix handling of GC compaction (I hope).
+
 ### v0.1.0
 
   - Initial implementation.
