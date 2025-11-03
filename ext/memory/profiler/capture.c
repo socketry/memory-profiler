@@ -23,8 +23,20 @@ static VALUE Memory_Profiler_Capture = Qnil;
 static VALUE sym_newobj;
 static VALUE sym_freeobj;
 
-// Queue item - freed object data to be processed after GC
-struct Memory_Profiler_Queue_Item {
+// Queue item - new object data to be processed via postponed job
+struct Memory_Profiler_Newobj_Queue_Item {
+	// The class of the new object:
+	VALUE klass;
+
+	// The Allocations wrapper:
+	VALUE allocations;
+
+	// The newly allocated object:
+	VALUE object;
+};
+
+// Queue item - freed object data to be processed via postponed job
+struct Memory_Profiler_Freeobj_Queue_Item {
 	// The class of the freed object:
 	VALUE klass;
 
@@ -43,10 +55,13 @@ struct Memory_Profiler_Capture {
 	// Is tracking enabled (via start/stop):
 	int enabled;
 	
-	// Queue for freed objects (processed after GC via postponed job)
-	struct Memory_Profiler_Queue freed_queue;
+	// Queue for new objects (processed via postponed job):
+	struct Memory_Profiler_Queue newobj_queue;
 	
-	// Handle for the postponed job
+	// Queue for freed objects (processed via postponed job):
+	struct Memory_Profiler_Queue freeobj_queue;
+	
+	// Handle for the postponed job (processes both queues)
 	rb_postponed_job_handle_t postponed_job_handle;
 };
 
@@ -75,9 +90,17 @@ static void Memory_Profiler_Capture_mark(void *ptr) {
 		st_foreach(capture->tracked_classes, Memory_Profiler_Capture_tracked_classes_mark, 0);
 	}
 	
+	// Mark new objects in the queue:
+	for (size_t i = 0; i < capture->newobj_queue.count; i++) {
+		struct Memory_Profiler_Newobj_Queue_Item *newobj = Memory_Profiler_Queue_at(&capture->newobj_queue, i);
+		rb_gc_mark_movable(newobj->klass);
+		rb_gc_mark_movable(newobj->allocations);
+		rb_gc_mark_movable(newobj->object);
+	}
+	
 	// Mark freed objects in the queue:
-	for (size_t i = 0; i < capture->freed_queue.count; i++) {
-		struct Memory_Profiler_Queue_Item *freed = Memory_Profiler_Queue_at(&capture->freed_queue, i);
+	for (size_t i = 0; i < capture->freeobj_queue.count; i++) {
+		struct Memory_Profiler_Freeobj_Queue_Item *freed = Memory_Profiler_Queue_at(&capture->freeobj_queue, i);
 		rb_gc_mark_movable(freed->klass);
 		rb_gc_mark_movable(freed->allocations);
 
@@ -95,8 +118,9 @@ static void Memory_Profiler_Capture_free(void *ptr) {
 		st_free_table(capture->tracked_classes);
 	}
 	
-	// Free the queue (elements are stored directly, just free the queue)
-	Memory_Profiler_Queue_free(&capture->freed_queue);
+	// Free both queues (elements are stored directly, just free the queues)
+	Memory_Profiler_Queue_free(&capture->newobj_queue);
+	Memory_Profiler_Queue_free(&capture->freeobj_queue);
 	
 	xfree(capture);
 }
@@ -110,8 +134,9 @@ static size_t Memory_Profiler_Capture_memsize(const void *ptr) {
 		size += capture->tracked_classes->num_entries * (sizeof(st_data_t) + sizeof(struct Memory_Profiler_Capture_Allocations));
 	}
 	
-	// Add size of freed queue (elements stored directly)
-	size += capture->freed_queue.capacity * capture->freed_queue.element_size;
+	// Add size of both queues (elements stored directly)
+	size += capture->newobj_queue.capacity * capture->newobj_queue.element_size;
+	size += capture->freeobj_queue.capacity * capture->freeobj_queue.element_size;
 	
 	return size;
 }
@@ -152,9 +177,19 @@ static void Memory_Profiler_Capture_compact(void *ptr) {
 		}
 	}
 	
+	// Update new objects in the queue
+	for (size_t i = 0; i < capture->newobj_queue.count; i++) {
+		struct Memory_Profiler_Newobj_Queue_Item *newobj = Memory_Profiler_Queue_at(&capture->newobj_queue, i);
+		
+		// Update all VALUEs if they moved during compaction
+		newobj->klass = rb_gc_location(newobj->klass);
+		newobj->allocations = rb_gc_location(newobj->allocations);
+		newobj->object = rb_gc_location(newobj->object);
+	}
+	
 	// Update freed objects in the queue
-	for (size_t i = 0; i < capture->freed_queue.count; i++) {
-		struct Memory_Profiler_Queue_Item *freed = Memory_Profiler_Queue_at(&capture->freed_queue, i);
+	for (size_t i = 0; i < capture->freeobj_queue.count; i++) {
+		struct Memory_Profiler_Freeobj_Queue_Item *freed = Memory_Profiler_Queue_at(&capture->freeobj_queue, i);
 		
 		// Update all VALUEs if they moved during compaction
 		freed->klass = rb_gc_location(freed->klass);
@@ -192,18 +227,52 @@ const char *event_flag_name(rb_event_flag_t event_flag) {
 	}
 }
 
-// Postponed job callback - processes queued freed objects
-// This runs after GC completes, when it's safe to call Ruby code
-static void Memory_Profiler_Capture_process_freed_queue(void *arg) {
+// Postponed job callback - processes queued new and freed objects
+// This runs when it's safe to call Ruby code (not during allocation or GC)
+// IMPORTANT: Process newobj queue first, then freeobj queue to maintain order
+static void Memory_Profiler_Capture_process_queues(void *arg) {
 	VALUE self = (VALUE)arg;
 	struct Memory_Profiler_Capture *capture;
 	TypedData_Get_Struct(self, struct Memory_Profiler_Capture, &Memory_Profiler_Capture_type, capture);
 	
-	if (DEBUG_FREED_QUEUE) fprintf(stderr, "Processing freed queue with %zu entries\n", capture->freed_queue.count);
+	if (DEBUG_FREED_QUEUE) fprintf(stderr, "Processing queues: %zu newobj, %zu freeobj\n", 
+		capture->newobj_queue.count, capture->freeobj_queue.count);
 	
-	// Process all freed objects in the queue
-	for (size_t i = 0; i < capture->freed_queue.count; i++) {
-		struct Memory_Profiler_Queue_Item *freed = Memory_Profiler_Queue_at(&capture->freed_queue, i);
+	// Disable tracking during queue processing to prevent infinite loop
+	// (rb_funcall can allocate, which would trigger more NEWOBJ events)
+	int was_enabled = capture->enabled;
+	capture->enabled = 0;
+	
+	// First, process all new objects in the queue
+	for (size_t i = 0; i < capture->newobj_queue.count; i++) {
+		struct Memory_Profiler_Newobj_Queue_Item *newobj = Memory_Profiler_Queue_at(&capture->newobj_queue, i);
+		VALUE klass = newobj->klass;
+		VALUE allocations = newobj->allocations;
+		VALUE object = newobj->object;
+		
+		struct Memory_Profiler_Capture_Allocations *record = Memory_Profiler_Allocations_get(allocations);
+		
+		// Call the Ruby callback with (klass, :newobj, nil) - callback returns state to store
+		if (!NIL_P(record->callback)) {
+			VALUE state = rb_funcall(record->callback, rb_intern("call"), 3, klass, sym_newobj, Qnil);
+			
+			// Store the state if callback returned something
+			if (!NIL_P(state)) {
+				if (!record->object_states) {
+					record->object_states = st_init_numtable();
+				}
+				
+				if (DEBUG_STATE) fprintf(stderr, "Memory_Profiler_Capture_process_queues: Storing state for object: %p (%s)\n", 
+					(void *)object, rb_class2name(klass));
+
+				st_insert(record->object_states, (st_data_t)object, (st_data_t)state);
+			}
+		}
+	}
+	
+	// Then, process all freed objects in the queue
+	for (size_t i = 0; i < capture->freeobj_queue.count; i++) {
+		struct Memory_Profiler_Freeobj_Queue_Item *freed = Memory_Profiler_Queue_at(&capture->freeobj_queue, i);
 		VALUE klass = freed->klass;
 		VALUE allocations = freed->allocations;
 		VALUE state = freed->state;
@@ -216,41 +285,43 @@ static void Memory_Profiler_Capture_process_freed_queue(void *arg) {
 		}
 	}
 	
-	// Clear the queue (elements are reused on next cycle)
-	Memory_Profiler_Queue_clear(&capture->freed_queue);
+	// Clear both queues (elements are reused on next cycle)
+	Memory_Profiler_Queue_clear(&capture->newobj_queue);
+	Memory_Profiler_Queue_clear(&capture->freeobj_queue);
+	
+	// Restore tracking state
+	capture->enabled = was_enabled;
 }
 
 // Handler for NEWOBJ event
+// SAFE: No longer calls Ruby code directly - queues for deferred processing
 static void Memory_Profiler_Capture_newobj_handler(VALUE self, struct Memory_Profiler_Capture *capture, VALUE klass, VALUE object) {
 	st_data_t allocations_data;
 	if (st_lookup(capture->tracked_classes, (st_data_t)klass, &allocations_data)) {
 		VALUE allocations = (VALUE)allocations_data;
 		struct Memory_Profiler_Capture_Allocations *record = Memory_Profiler_Allocations_get(allocations);
 		record->new_count++;
+		
+		// If we have a callback, queue the newobj for later processing
 		if (!NIL_P(record->callback)) {
-			// Invoke callback - runs during NEWOBJ with GC disabled
-			// CRITICAL CALLBACK REQUIREMENTS:
-			// - Must be FAST (runs on EVERY allocation)
-			// - Must NOT call GC.start (will deadlock)
-			// - Must NOT block/sleep (stalls all allocations system-wide)
-			// - Should NOT raise exceptions (will propagate to allocating code)
-			// - Avoid allocating objects (causes re-entry)
-			
-			// Call with (klass, :newobj, nil) - callback returns state to store
-			VALUE state = rb_funcall(record->callback, rb_intern("call"), 3, klass, sym_newobj, Qnil);
-			
-			// Store the state if callback returned something
-			if (!NIL_P(state)) {
-				if (!record->object_states) {
-					record->object_states = st_init_numtable();
-				}
+			// Push a new item onto the queue (returns pointer to write to)
+			// NOTE: realloc is safe during allocation (doesn't trigger Ruby allocation)
+			struct Memory_Profiler_Newobj_Queue_Item *newobj = Memory_Profiler_Queue_push(&capture->newobj_queue);
+			if (newobj) {
+				if (DEBUG_FREED_QUEUE) fprintf(stderr, "Queued newobj, queue size now: %zu/%zu\n", 
+					capture->newobj_queue.count, capture->newobj_queue.capacity);
+				// Write directly to the allocated space
+				newobj->klass = klass;
+				newobj->allocations = allocations;
+				newobj->object = object;
 				
-				if (DEBUG_STATE) fprintf(stderr, "Memory_Profiler_Capture_newobj_handler: Inserting state for object: %p (%s)\n", (void *)object, rb_class2name(klass));
-
-				st_insert(record->object_states, (st_data_t)object, (st_data_t)state);
-				// Notify GC about the state VALUE stored in the table
-				RB_OBJ_WRITTEN(self, Qnil, state);
+				// Trigger postponed job to process the queue
+				if (DEBUG_FREED_QUEUE) fprintf(stderr, "Triggering postponed job to process queues\n");
+				rb_postponed_job_trigger(capture->postponed_job_handle);
+			} else {
+				if (DEBUG_FREED_QUEUE) fprintf(stderr, "Failed to queue newobj, out of memory\n");
 			}
+			// If push failed (out of memory), silently drop this newobj event
 		}
 	} else {
 		// Create record for this class (first time seeing it)
@@ -293,16 +364,17 @@ static void Memory_Profiler_Capture_freeobj_handler(VALUE self, struct Memory_Pr
 				
 				// Push a new item onto the queue (returns pointer to write to)
 				// NOTE: realloc is safe during GC (doesn't trigger Ruby allocation)
-				struct Memory_Profiler_Queue_Item *freed = Memory_Profiler_Queue_push(&capture->freed_queue);
+				struct Memory_Profiler_Freeobj_Queue_Item *freed = Memory_Profiler_Queue_push(&capture->freeobj_queue);
 				if (freed) {
-					if (DEBUG_FREED_QUEUE) fprintf(stderr, "Queued freed object, queue size now: %zu/%zu\n", capture->freed_queue.count, capture->freed_queue.capacity);
+					if (DEBUG_FREED_QUEUE) fprintf(stderr, "Queued freed object, queue size now: %zu/%zu\n", 
+						capture->freeobj_queue.count, capture->freeobj_queue.capacity);
 					// Write directly to the allocated space
 					freed->klass = klass;
 					freed->allocations = allocations;
 					freed->state = state;
 					
-					// Trigger postponed job to process the queue after GC
-					if (DEBUG_FREED_QUEUE) fprintf(stderr, "Triggering postponed job to process the queue after GC\n");
+					// Trigger postponed job to process both queues after GC
+					if (DEBUG_FREED_QUEUE) fprintf(stderr, "Triggering postponed job to process queues after GC\n");
 					rb_postponed_job_trigger(capture->postponed_job_handle);
 				} else {
 					if (DEBUG_FREED_QUEUE) fprintf(stderr, "Failed to queue freed object, out of memory\n");
@@ -403,14 +475,15 @@ static VALUE Memory_Profiler_Capture_alloc(VALUE klass) {
 	
 	capture->enabled = 0;
 	
-	// Initialize the freed object queue
-	Memory_Profiler_Queue_initialize(&capture->freed_queue, sizeof(struct Memory_Profiler_Queue_Item));
+	// Initialize both queues
+	Memory_Profiler_Queue_initialize(&capture->newobj_queue, sizeof(struct Memory_Profiler_Newobj_Queue_Item));
+	Memory_Profiler_Queue_initialize(&capture->freeobj_queue, sizeof(struct Memory_Profiler_Freeobj_Queue_Item));
 	
-	// Pre-register the postponed job for processing freed objects
-	// The job will be triggered whenever we queue freed objects during GC
+	// Pre-register the postponed job for processing both queues
+	// The job will be triggered whenever we queue newobj or freeobj events
 	capture->postponed_job_handle = rb_postponed_job_preregister(
 		0, // flags
-		Memory_Profiler_Capture_process_freed_queue,
+		Memory_Profiler_Capture_process_queues,
 		(void *)obj
 	);
 	
