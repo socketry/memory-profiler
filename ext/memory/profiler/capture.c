@@ -310,10 +310,11 @@ static void Memory_Profiler_Capture_newobj_handler(VALUE self, struct Memory_Pro
 			if (newobj) {
 				if (DEBUG_EVENT_QUEUES) fprintf(stderr, "Queued newobj, queue size now: %zu/%zu\n", 
 					capture->newobj_queue.count, capture->newobj_queue.capacity);
-				// Write directly to the allocated space
-				newobj->klass = klass;
-				newobj->allocations = allocations;
-				newobj->object = object;
+				
+				// Write VALUEs with write barriers (combines write + GC notification)
+				RB_OBJ_WRITE(self, &newobj->klass, klass);
+				RB_OBJ_WRITE(self, &newobj->allocations, allocations);
+				RB_OBJ_WRITE(self, &newobj->object, object);
 				
 				// Trigger postponed job to process the queue
 				if (DEBUG_EVENT_QUEUES) fprintf(stderr, "Triggering postponed job to process queues\n");
@@ -364,14 +365,16 @@ static void Memory_Profiler_Capture_freeobj_handler(VALUE self, struct Memory_Pr
 				
 				// Push a new item onto the queue (returns pointer to write to)
 				// NOTE: realloc is safe during GC (doesn't trigger Ruby allocation)
-				struct Memory_Profiler_Freeobj_Queue_Item *freed = Memory_Profiler_Queue_push(&capture->freeobj_queue);
-				if (freed) {
+				struct Memory_Profiler_Freeobj_Queue_Item *freeobj = Memory_Profiler_Queue_push(&capture->freeobj_queue);
+				if (freeobj) {
 					if (DEBUG_EVENT_QUEUES) fprintf(stderr, "Queued freed object, queue size now: %zu/%zu\n", 
 						capture->freeobj_queue.count, capture->freeobj_queue.capacity);
-					// Write directly to the allocated space
-					freed->klass = klass;
-					freed->allocations = allocations;
-					freed->state = state;
+					
+					// Write VALUEs with write barriers (combines write + GC notification)
+					// Note: We're during GC/FREEOBJ, but write barriers should be safe
+					RB_OBJ_WRITE(self, &freeobj->klass, klass);
+					RB_OBJ_WRITE(self, &freeobj->allocations, allocations);
+					RB_OBJ_WRITE(self, &freeobj->state, state);
 					
 					// Trigger postponed job to process both queues after GC
 					if (DEBUG_EVENT_QUEUES) fprintf(stderr, "Triggering postponed job to process queues after GC\n");
