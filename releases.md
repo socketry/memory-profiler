@@ -1,6 +1,6 @@
 # Releases
 
-## Unreleased
+## v1.1.5
 
   - Use queue for `newobj` too to avoid invoking user code during object allocation.
 

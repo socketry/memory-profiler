@@ -22,9 +22,13 @@ Please see the [project documentation](https://socketry.github.io/memory-profile
 
 Please see the [project releases](https://socketry.github.io/memory-profiler/releases/index) for all releases.
 
+### v1.1.5
+
+  - Use queue for `newobj` too to avoid invoking user code during object allocation.
+
 ### v1.1.2
 
-    - Fix handling of GC compaction (I hope).
+  - Fix handling of GC compaction (I hope).
 
 ### v0.1.0
 
