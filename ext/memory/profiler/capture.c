@@ -13,6 +13,7 @@
 
 enum {
 	DEBUG = 0,
+	DEBUG_FREED_QUEUE = 0,
 };
 
 static VALUE Memory_Profiler_Capture = Qnil;
@@ -197,7 +198,7 @@ static void Memory_Profiler_Capture_process_freed_queue(void *arg) {
 	struct Memory_Profiler_Capture *capture;
 	TypedData_Get_Struct(self, struct Memory_Profiler_Capture, &Memory_Profiler_Capture_type, capture);
 	
-	if (DEBUG) {
+	if (DEBUG_FREED_QUEUE) {
 		fprintf(stderr, "Processing freed queue with %zu entries\n", capture->freed_queue.count);
 	}
 	
@@ -358,7 +359,12 @@ static void Memory_Profiler_Capture_event_callback(VALUE data, void *ptr) {
 	if (!klass) return;
 	
 	if (DEBUG) {
-		const char *klass_name = rb_class2name(klass);
+		// In events other than NEWOBJ, we are unable to allocate objects (due to GC), so we simply say "ignored":
+		const char *klass_name = "ignored";
+		if (event_flag == RUBY_INTERNAL_EVENT_NEWOBJ) {
+			klass_name = rb_class2name(klass);
+		}
+		
 		fprintf(stderr, "Memory_Profiler_Capture_event_callback: %s, Object: %p, Class: %p (%s)\n", event_flag_name(event_flag), (void *)object, (void *)klass, klass_name);
 	}
 	
