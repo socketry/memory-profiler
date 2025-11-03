@@ -1,6 +1,6 @@
 # Releases
 
-## Unreleased
+## v1.1.7
 
   - Expose `Capture#statistics` for debugging internal memory tracking state.
 

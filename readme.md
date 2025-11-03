@@ -22,6 +22,10 @@ Please see the [project documentation](https://socketry.github.io/memory-profile
 
 Please see the [project releases](https://socketry.github.io/memory-profiler/releases/index) for all releases.
 
+### v1.1.7
+
+  - Expose `Capture#statistics` for debugging internal memory tracking state.
+
 ### v1.1.6
 
   - Write barriers all the things.
