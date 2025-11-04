@@ -3,7 +3,7 @@
 
 #include "capture.h"
 #include "allocations.h"
-#include "queue.h"
+#include "events.h"
 
 #include "ruby.h"
 #include "ruby/debug.h"
@@ -13,107 +13,47 @@
 
 enum {
 	DEBUG = 0,
-	DEBUG_EVENT_QUEUES = 0,
 	DEBUG_STATE = 0,
 };
 
 static VALUE Memory_Profiler_Capture = Qnil;
 
-// Event symbols
-static VALUE sym_newobj;
-static VALUE sym_freeobj;
+// Event symbols:
+static VALUE sym_newobj, sym_freeobj;
 
-// Queue item - new object data to be processed via postponed job
-struct Memory_Profiler_Newobj_Queue_Item {
-	// The class of the new object:
-	VALUE klass;
-
-	// The Allocations wrapper:
-	VALUE allocations;
-
-	// The newly allocated object:
-	VALUE object;
-};
-
-// Queue item - freed object data to be processed via postponed job
-struct Memory_Profiler_Freeobj_Queue_Item {
-	// The class of the freed object:
-	VALUE klass;
-
-	// The Allocations wrapper:
-	VALUE allocations;
-
-	// The state returned from callback on newobj:
-	VALUE state;
-};
-
-// Main capture state
+// Main capture state (per-instance).
 struct Memory_Profiler_Capture {
-	// class => VALUE (wrapped Memory_Profiler_Capture_Allocations).
+	// Tracked classes: class => VALUE (wrapped Memory_Profiler_Capture_Allocations).
 	st_table *tracked_classes;
 
-	// Master switch - is tracking active? (set by start/stop)
+	// Master switch - is tracking active? (set by start/stop).
 	int running;
 	
-	// Internal - should we queue callbacks? (temporarily disabled during queue processing)
+	// Should we queue callbacks? (temporarily disabled during queue processing).
 	int enabled;
-	
-	// Queue for new objects (processed via postponed job):
-	struct Memory_Profiler_Queue newobj_queue;
-	
-	// Queue for freed objects (processed via postponed job):
-	struct Memory_Profiler_Queue freeobj_queue;
-	
-	// Handle for the postponed job (processes both queues)
-	rb_postponed_job_handle_t postponed_job_handle;
 };
 
-// GC mark callback for tracked_classes table
+// GC mark callback for tracked_classes table.
 static int Memory_Profiler_Capture_tracked_classes_mark(st_data_t key, st_data_t value, st_data_t arg) {
-	// Mark class as un-movable as we don't want it moving in freeobj.
+	// Mark class as un-movable:
 	VALUE klass = (VALUE)key;
 	rb_gc_mark(klass);
 	
-	// Mark the wrapped Allocations VALUE (its own mark function will handle internal refs)
+	// Mark the wrapped Allocations VALUE:
 	VALUE allocations = (VALUE)value;
 	rb_gc_mark_movable(allocations);
 	
 	return ST_CONTINUE;
 }
 
-// GC mark function
 static void Memory_Profiler_Capture_mark(void *ptr) {
 	struct Memory_Profiler_Capture *capture = ptr;
-	
-	if (!capture) {
-		return;
-	}
 	
 	if (capture->tracked_classes) {
 		st_foreach(capture->tracked_classes, Memory_Profiler_Capture_tracked_classes_mark, 0);
 	}
-	
-	// Mark new objects in the queue:
-	for (size_t i = 0; i < capture->newobj_queue.count; i++) {
-		struct Memory_Profiler_Newobj_Queue_Item *newobj = Memory_Profiler_Queue_at(&capture->newobj_queue, i);
-		rb_gc_mark_movable(newobj->klass);
-		rb_gc_mark_movable(newobj->allocations);
-		rb_gc_mark_movable(newobj->object);
-	}
-	
-	// Mark freed objects in the queue:
-	for (size_t i = 0; i < capture->freeobj_queue.count; i++) {
-		struct Memory_Profiler_Freeobj_Queue_Item *freed = Memory_Profiler_Queue_at(&capture->freeobj_queue, i);
-		rb_gc_mark_movable(freed->klass);
-		rb_gc_mark_movable(freed->allocations);
-
-		if (freed->state) {
-			rb_gc_mark_movable(freed->state);
-		}
-	}
 }
 
-// GC free function
 static void Memory_Profiler_Capture_free(void *ptr) {
 	struct Memory_Profiler_Capture *capture = ptr;
 		
@@ -121,14 +61,9 @@ static void Memory_Profiler_Capture_free(void *ptr) {
 		st_free_table(capture->tracked_classes);
 	}
 	
-	// Free both queues (elements are stored directly, just free the queues)
-	Memory_Profiler_Queue_free(&capture->newobj_queue);
-	Memory_Profiler_Queue_free(&capture->freeobj_queue);
-	
 	xfree(capture);
 }
 
-// GC memsize function
 static size_t Memory_Profiler_Capture_memsize(const void *ptr) {
 	const struct Memory_Profiler_Capture *capture = ptr;
 	size_t size = sizeof(struct Memory_Profiler_Capture);
@@ -137,29 +72,24 @@ static size_t Memory_Profiler_Capture_memsize(const void *ptr) {
 		size += capture->tracked_classes->num_entries * (sizeof(st_data_t) + sizeof(struct Memory_Profiler_Capture_Allocations));
 	}
 	
-	// Add size of both queues (elements stored directly)
-	size += capture->newobj_queue.capacity * capture->newobj_queue.element_size;
-	size += capture->freeobj_queue.capacity * capture->freeobj_queue.element_size;
-	
 	return size;
 }
 
-// Foreach callback for st_foreach_with_replace (iteration logic)
+// Foreach callback for st_foreach_with_replace (iteration logic).
 static int Memory_Profiler_Capture_tracked_classes_foreach(st_data_t key, st_data_t value, st_data_t argp, int error) {
-	// Return ST_REPLACE to trigger the replace callback for each entry
 	return ST_REPLACE;
 }
 
-// Replace callback for st_foreach_with_replace (update logic)
+// Replace callback for st_foreach_with_replace (update logic).
 static int Memory_Profiler_Capture_tracked_classes_update(st_data_t *key, st_data_t *value, st_data_t argp, int existing) {
-	// Update class key if it moved
+	// Update class key if it moved:
 	VALUE old_klass = (VALUE)*key;
 	VALUE new_klass = rb_gc_location(old_klass);
 	if (old_klass != new_klass) {
 		*key = (st_data_t)new_klass;
 	}
 	
-	// Update wrapped Allocations VALUE if it moved (its own compact function handles internal refs)
+	// Update wrapped Allocations VALUE if it moved:
 	VALUE old_allocations = (VALUE)*value;
 	VALUE new_allocations = rb_gc_location(old_allocations);
 	if (old_allocations != new_allocations) {
@@ -169,35 +99,14 @@ static int Memory_Profiler_Capture_tracked_classes_update(st_data_t *key, st_dat
 	return ST_CONTINUE;
 }
 
-// GC compact function - update VALUEs when GC compaction moves objects
 static void Memory_Profiler_Capture_compact(void *ptr) {
 	struct Memory_Profiler_Capture *capture = ptr;
 	
-	// Update tracked_classes keys and callback values in-place
+	// Update tracked_classes keys and allocations values in-place:
 	if (capture->tracked_classes && capture->tracked_classes->num_entries > 0) {
 		if (st_foreach_with_replace(capture->tracked_classes, Memory_Profiler_Capture_tracked_classes_foreach, Memory_Profiler_Capture_tracked_classes_update, 0)) {
 			rb_raise(rb_eRuntimeError, "tracked_classes modified during GC compaction");
 		}
-	}
-	
-	// Update new objects in the queue
-	for (size_t i = 0; i < capture->newobj_queue.count; i++) {
-		struct Memory_Profiler_Newobj_Queue_Item *newobj = Memory_Profiler_Queue_at(&capture->newobj_queue, i);
-		
-		// Update all VALUEs if they moved during compaction
-		newobj->klass = rb_gc_location(newobj->klass);
-		newobj->allocations = rb_gc_location(newobj->allocations);
-		newobj->object = rb_gc_location(newobj->object);
-	}
-	
-	// Update freed objects in the queue
-	for (size_t i = 0; i < capture->freeobj_queue.count; i++) {
-		struct Memory_Profiler_Freeobj_Queue_Item *freed = Memory_Profiler_Queue_at(&capture->freeobj_queue, i);
-		
-		// Update all VALUEs if they moved during compaction
-		freed->klass = rb_gc_location(freed->klass);
-		freed->allocations = rb_gc_location(freed->allocations);
-		freed->state = rb_gc_location(freed->state);
 	}
 }
 
@@ -230,174 +139,130 @@ const char *event_flag_name(rb_event_flag_t event_flag) {
 	}
 }
 
-// Postponed job callback - processes queued new and freed objects
-// This runs when it's safe to call Ruby code (not during allocation or GC)
-// IMPORTANT: Process newobj queue first, then freeobj queue to maintain order
-static void Memory_Profiler_Capture_process_queues(void *arg) {
-	VALUE self = (VALUE)arg;
+// Process a NEWOBJ event. Handles both callback and non-callback cases, stores appropriate state.
+static void Memory_Profiler_Capture_process_newobj(VALUE capture_value, VALUE klass, VALUE allocations, VALUE object) {
 	struct Memory_Profiler_Capture *capture;
-	TypedData_Get_Struct(self, struct Memory_Profiler_Capture, &Memory_Profiler_Capture_type, capture);
+	TypedData_Get_Struct(capture_value, struct Memory_Profiler_Capture, &Memory_Profiler_Capture_type, capture);
 	
-	if (DEBUG_EVENT_QUEUES) fprintf(stderr, "Processing queues: %zu newobj, %zu freeobj\n", 
-		capture->newobj_queue.count, capture->freeobj_queue.count);
+	struct Memory_Profiler_Capture_Allocations *record = Memory_Profiler_Allocations_get(allocations);
 	
-	// Disable tracking during queue processing to prevent infinite loop
-	// (rb_funcall can allocate, which would trigger more NEWOBJ events)
-	int was_enabled = capture->enabled;
-	capture->enabled = 0;
-	
-	// First, process all new objects in the queue
-	for (size_t i = 0; i < capture->newobj_queue.count; i++) {
-		struct Memory_Profiler_Newobj_Queue_Item *newobj = Memory_Profiler_Queue_at(&capture->newobj_queue, i);
-		VALUE klass = newobj->klass;
-		VALUE allocations = newobj->allocations;
-		VALUE object = newobj->object;
-		
-		struct Memory_Profiler_Capture_Allocations *record = Memory_Profiler_Allocations_get(allocations);
-		
-		// Call the Ruby callback with (klass, :newobj, nil) - callback returns state to store
-		if (!NIL_P(record->callback)) {
-			VALUE state = rb_funcall(record->callback, rb_intern("call"), 3, klass, sym_newobj, Qnil);
-			
-			// Store the state if callback returned something
-			if (!NIL_P(state)) {
-				if (!record->object_states) {
-					record->object_states = st_init_numtable();
-				}
-				
-				if (DEBUG_STATE) fprintf(stderr, "Memory_Profiler_Capture_process_queues: Storing state for object: %p (%s)\n", 
-					(void *)object, rb_class2name(klass));
-
-				st_insert(record->object_states, (st_data_t)object, (st_data_t)state);
-			}
-		}
+	// Ensure object_states table exists:
+	if (!record->object_states) {
+		record->object_states = st_init_numtable();
 	}
 	
-	// Then, process all freed objects in the queue
-	for (size_t i = 0; i < capture->freeobj_queue.count; i++) {
-		struct Memory_Profiler_Freeobj_Queue_Item *freed = Memory_Profiler_Queue_at(&capture->freeobj_queue, i);
-		VALUE klass = freed->klass;
-		VALUE allocations = freed->allocations;
-		VALUE state = freed->state;
+	VALUE state;
+	
+	if (!NIL_P(record->callback)) {
+		// Temporarily disable queueing to prevent infinite loop:
+		int was_enabled = capture->enabled;
+		capture->enabled = 0;
 		
-		struct Memory_Profiler_Capture_Allocations *record = Memory_Profiler_Allocations_get(allocations);
+		state = rb_funcall(record->callback, rb_intern("call"), 3, klass, sym_newobj, Qnil);
 		
-		// Call the Ruby callback with (klass, :freeobj, state)
-		if (!NIL_P(record->callback)) {
-			rb_funcall(record->callback, rb_intern("call"), 3, klass, sym_freeobj, state);
-		}
+		capture->enabled = was_enabled;
+		
+		if (DEBUG_STATE) fprintf(stderr, "Storing callback state for object: %p\n", (void *)object);
+	} else {
+		// No callback, store sentinel (Qnil):
+		state = Qnil;
+		
+		if (DEBUG_STATE) fprintf(stderr, "Storing sentinel (Qnil) for object: %p\n", (void *)object);
 	}
 	
-	// Clear both queues (elements are reused on next cycle)
-	Memory_Profiler_Queue_clear(&capture->newobj_queue);
-	Memory_Profiler_Queue_clear(&capture->freeobj_queue);
-	
-	// Restore tracking state
-	capture->enabled = was_enabled;
+	// Always store something to maintain NEWOBJ/FREEOBJ symmetry:
+	st_insert(record->object_states, (st_data_t)object, (st_data_t)state);
 }
 
-// Handler for NEWOBJ event
-// SAFE: No longer calls Ruby code directly - queues for deferred processing
+// Process a FREEOBJ event. Looks up and deletes state, optionally calls callback.
+static void Memory_Profiler_Capture_process_freeobj(VALUE capture_value, VALUE klass, VALUE allocations, VALUE object) {
+	struct Memory_Profiler_Capture *capture;
+	TypedData_Get_Struct(capture_value, struct Memory_Profiler_Capture, &Memory_Profiler_Capture_type, capture);
+	
+	struct Memory_Profiler_Capture_Allocations *record = Memory_Profiler_Allocations_get(allocations);
+	
+	// Try to look up and delete state:
+	if (record->object_states) {
+		st_data_t state_data;
+		if (st_delete(record->object_states, (st_data_t *)&object, &state_data)) {
+			VALUE state = (VALUE)state_data;
+			
+			if (DEBUG_STATE) fprintf(stderr, "Freed tracked object: %p, state=%s\n", 
+				(void *)object, NIL_P(state) ? "Qnil (sentinel)" : "real state");
+			
+			// Only call callback if we have both callback AND real state (not Qnil sentinel):
+			if (!NIL_P(record->callback) && !NIL_P(state)) {
+				// Temporarily disable queueing to prevent infinite loop:
+				int was_enabled = capture->enabled;
+				capture->enabled = 0;
+				
+				rb_funcall(record->callback, rb_intern("call"), 3, klass, sym_freeobj, state);
+				
+				capture->enabled = was_enabled;
+			}
+		} else {
+			if (DEBUG_STATE) fprintf(stderr, "Freed pre-existing object: %p (not tracked)\n", (void *)object);
+		}
+	}
+}
+
+// Process a single event (NEWOBJ or FREEOBJ). Called from events.c via rb_protect to catch exceptions.
+void Memory_Profiler_Capture_process_event(struct Memory_Profiler_Event *event) {
+	switch (event->type) {
+		case MEMORY_PROFILER_EVENT_TYPE_NEWOBJ:
+			Memory_Profiler_Capture_process_newobj(event->capture, event->klass, event->allocations, event->object);
+			break;
+		case MEMORY_PROFILER_EVENT_TYPE_FREEOBJ:
+			Memory_Profiler_Capture_process_freeobj(event->capture, event->klass, event->allocations, event->object);
+			break;
+	}
+}
+
+#pragma mark - Event Handlers
+
+// NEWOBJ event handler. Automatically tracks ALL allocations (creates records on demand).
 static void Memory_Profiler_Capture_newobj_handler(VALUE self, struct Memory_Profiler_Capture *capture, VALUE klass, VALUE object) {
 	st_data_t allocations_data;
+	VALUE allocations;
+	
 	if (st_lookup(capture->tracked_classes, (st_data_t)klass, &allocations_data)) {
-		VALUE allocations = (VALUE)allocations_data;
+		// Existing record, increment count:
+		allocations = (VALUE)allocations_data;
 		struct Memory_Profiler_Capture_Allocations *record = Memory_Profiler_Allocations_get(allocations);
-		
-		// Always track counts (even during queue processing)
 		record->new_count++;
-		
-		// Only queue for callback if tracking is enabled (prevents infinite recursion)
-		if (capture->enabled && !NIL_P(record->callback)) {
-			// Push a new item onto the queue (returns pointer to write to)
-			// NOTE: realloc is safe during allocation (doesn't trigger Ruby allocation)
-			struct Memory_Profiler_Newobj_Queue_Item *newobj = Memory_Profiler_Queue_push(&capture->newobj_queue);
-			if (newobj) {
-				if (DEBUG_EVENT_QUEUES) fprintf(stderr, "Queued newobj, queue size now: %zu/%zu\n", 
-					capture->newobj_queue.count, capture->newobj_queue.capacity);
-				
-				// Write VALUEs with write barriers (combines write + GC notification)
-				RB_OBJ_WRITE(self, &newobj->klass, klass);
-				RB_OBJ_WRITE(self, &newobj->allocations, allocations);
-				RB_OBJ_WRITE(self, &newobj->object, object);
-				
-				// Trigger postponed job to process the queue
-				if (DEBUG_EVENT_QUEUES) fprintf(stderr, "Triggering postponed job to process queues\n");
-				rb_postponed_job_trigger(capture->postponed_job_handle);
-			} else {
-				if (DEBUG_EVENT_QUEUES) fprintf(stderr, "Failed to queue newobj, out of memory\n");
-			}
-			// If push failed (out of memory), silently drop this newobj event
-		}
 	} else {
-		// Create record for this class (first time seeing it)
+		// First time seeing this class, create record automatically:
 		struct Memory_Profiler_Capture_Allocations *record = ALLOC(struct Memory_Profiler_Capture_Allocations);
 		record->callback = Qnil;
-		record->new_count = 1;  // This is the first allocation
+		record->new_count = 1;
 		record->free_count = 0;
 		record->object_states = NULL;
 		
-		// Wrap the record in a VALUE
-		VALUE allocations = Memory_Profiler_Allocations_wrap(record);
-		
+		allocations = Memory_Profiler_Allocations_wrap(record);
 		st_insert(capture->tracked_classes, (st_data_t)klass, (st_data_t)allocations);
-		// Notify GC about the class VALUE stored as key in the table
 		RB_OBJ_WRITTEN(self, Qnil, klass);
-		// Notify GC about the allocations VALUE stored as value in the table
 		RB_OBJ_WRITTEN(self, Qnil, allocations);
 	}
+	
+	// Enqueue to global event queue:
+	Memory_Profiler_Events_enqueue(MEMORY_PROFILER_EVENT_TYPE_NEWOBJ, self, klass, allocations, object);
 }
 
-// Handler for FREEOBJ event
-// CRITICAL: This runs during GC when no Ruby code can be executed!
-// We MUST NOT call rb_funcall or any Ruby code here - just queue the work.
+// FREEOBJ event handler. Increments count and enqueues for processing.
 static void Memory_Profiler_Capture_freeobj_handler(VALUE self, struct Memory_Profiler_Capture *capture, VALUE klass, VALUE object) {
 	st_data_t allocations_data;
 	if (st_lookup(capture->tracked_classes, (st_data_t)klass, &allocations_data)) {
 		VALUE allocations = (VALUE)allocations_data;
 		struct Memory_Profiler_Capture_Allocations *record = Memory_Profiler_Allocations_get(allocations);
 		
-		// Always track counts (even during queue processing)
 		record->free_count++;
 		
-		// Only queue for callback if tracking is enabled and we have state
-		// Note: If NEWOBJ didn't queue (enabled=0), there's no state, so this naturally skips
-		if (capture->enabled && !NIL_P(record->callback) && record->object_states) {
-			if (DEBUG_STATE) fprintf(stderr, "Memory_Profiler_Capture_freeobj_handler: Looking up state for object: %p\n", (void *)object);
-
-			// Look up state stored during NEWOBJ
-			st_data_t state_data;
-			if (st_delete(record->object_states, (st_data_t *)&object, &state_data)) {
-				if (DEBUG_STATE) fprintf(stderr, "Found state for object: %p\n", (void *)object);
-				VALUE state = (VALUE)state_data;
-				
-				// Push a new item onto the queue (returns pointer to write to)
-				// NOTE: realloc is safe during GC (doesn't trigger Ruby allocation)
-				struct Memory_Profiler_Freeobj_Queue_Item *freeobj = Memory_Profiler_Queue_push(&capture->freeobj_queue);
-				if (freeobj) {
-					if (DEBUG_EVENT_QUEUES) fprintf(stderr, "Queued freed object, queue size now: %zu/%zu\n", 
-						capture->freeobj_queue.count, capture->freeobj_queue.capacity);
-					
-					// Write VALUEs with write barriers (combines write + GC notification)
-					// Note: We're during GC/FREEOBJ, but write barriers should be safe
-					RB_OBJ_WRITE(self, &freeobj->klass, klass);
-					RB_OBJ_WRITE(self, &freeobj->allocations, allocations);
-					RB_OBJ_WRITE(self, &freeobj->state, state);
-					
-					// Trigger postponed job to process both queues after GC
-					if (DEBUG_EVENT_QUEUES) fprintf(stderr, "Triggering postponed job to process queues after GC\n");
-					rb_postponed_job_trigger(capture->postponed_job_handle);
-				} else {
-					if (DEBUG_EVENT_QUEUES) fprintf(stderr, "Failed to queue freed object, out of memory\n");
-				}
-				// If push failed (out of memory), silently drop this freeobj event
-			}
-		}
+		// Enqueue to global event queue:
+		Memory_Profiler_Events_enqueue(MEMORY_PROFILER_EVENT_TYPE_FREEOBJ, self, klass, allocations, object);
 	}
 }
 
-// Check if object type is trackable (has valid class pointer and is a normal Ruby object)
-// Excludes internal types (T_IMEMO, T_NODE, T_ICLASS, etc.) that don't have normal classes
+// Check if object type is trackable. Excludes internal types (T_IMEMO, T_NODE, T_ICLASS, etc.) that don't have normal classes.
 int Memory_Profiler_Capture_trackable_p(VALUE object) {
 	switch (rb_type(object)) {
 		// Normal Ruby objects with valid class pointers
@@ -486,21 +351,7 @@ static VALUE Memory_Profiler_Capture_alloc(VALUE klass) {
 	capture->running = 0;
 	capture->enabled = 0;
 	
-	// Initialize both queues
-	Memory_Profiler_Queue_initialize(&capture->newobj_queue, sizeof(struct Memory_Profiler_Newobj_Queue_Item));
-	Memory_Profiler_Queue_initialize(&capture->freeobj_queue, sizeof(struct Memory_Profiler_Freeobj_Queue_Item));
-	
-	// Pre-register the postponed job for processing both queues
-	// The job will be triggered whenever we queue newobj or freeobj events
-	capture->postponed_job_handle = rb_postponed_job_preregister(
-		0, // flags
-		Memory_Profiler_Capture_process_queues,
-		(void *)obj
-	);
-	
-	if (capture->postponed_job_handle == POSTPONED_JOB_HANDLE_INVALID) {
-		rb_raise(rb_eRuntimeError, "Failed to register postponed job!");
-	}
+	// Global event queue system will auto-initialize on first use (lazy initialization)
 	
 	return obj;
 }
@@ -516,6 +367,10 @@ static VALUE Memory_Profiler_Capture_start(VALUE self) {
 	TypedData_Get_Struct(self, struct Memory_Profiler_Capture, &Memory_Profiler_Capture_type, capture);
 	
 	if (capture->running) return Qfalse;
+	
+	// Ensure global event queue system is initialized:
+	// It could fail and we want to raise an error if it does, here specifically.
+	Memory_Profiler_Events_instance();
 	
 	// Add event hook for NEWOBJ and FREEOBJ with RAW_ARG to get trace_arg
 	rb_add_event_hook2(
@@ -542,8 +397,9 @@ static VALUE Memory_Profiler_Capture_stop(VALUE self) {
 	// Remove event hook using same data (self) we registered with. No more events will be queued after this point:
 	rb_remove_event_hook_with_data((rb_event_hook_func_t)Memory_Profiler_Capture_event_callback, self);
 	
-	// Flush any pending queued events before stopping. This ensures all callbacks are invoked and object_states is properly maintained.
-	Memory_Profiler_Capture_process_queues((void *)self);
+	// Flush any pending queued events in the global queue before stopping.
+	// This ensures all callbacks are invoked and object_states is properly maintained.
+	Memory_Profiler_Events_process_all();
 	
 	// Clear both flags - we're no longer running and callbacks are disabled
 	capture->running = 0;
@@ -575,7 +431,7 @@ static VALUE Memory_Profiler_Capture_track(int argc, VALUE *argv, VALUE self) {
 		record->callback = callback;  // Initial assignment, no write barrier needed
 		record->new_count = 0;
 		record->free_count = 0;
-		record->object_states = NULL;
+		record->object_states = st_init_numtable();
 		
 		// Wrap the record in a VALUE
 		allocations = Memory_Profiler_Allocations_wrap(record);
@@ -615,7 +471,6 @@ static VALUE Memory_Profiler_Capture_tracking_p(VALUE self, VALUE klass) {
 	
 	return st_lookup(capture->tracked_classes, (st_data_t)klass, NULL) ? Qtrue : Qfalse;
 }
-
 
 // Get count of live objects for a specific class (O(1) lookup!)
 static VALUE Memory_Profiler_Capture_count_for(VALUE self, VALUE klass) {
@@ -725,11 +580,7 @@ static VALUE Memory_Profiler_Capture_statistics(VALUE self) {
 	// Tracked classes count
 	rb_hash_aset(statistics, ID2SYM(rb_intern("tracked_classes_count")), SIZET2NUM(capture->tracked_classes->num_entries));
 	
-	// Queue sizes
-	rb_hash_aset(statistics, ID2SYM(rb_intern("newobj_queue_size")), SIZET2NUM(capture->newobj_queue.count));
-	rb_hash_aset(statistics, ID2SYM(rb_intern("newobj_queue_capacity")), SIZET2NUM(capture->newobj_queue.capacity));
-	rb_hash_aset(statistics, ID2SYM(rb_intern("freeobj_queue_size")), SIZET2NUM(capture->freeobj_queue.count));
-	rb_hash_aset(statistics, ID2SYM(rb_intern("freeobj_queue_capacity")), SIZET2NUM(capture->freeobj_queue.capacity));
+	// Note: Global event queue stats are internal to the events module
 	
 	// Count object_states entries for each tracked class
 	struct Memory_Profiler_Allocations_Statistics allocations_statistics = {

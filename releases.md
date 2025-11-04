@@ -1,5 +1,9 @@
 # Releases
 
+## Unreleased
+
+  - Use single global queue for event handling to avoid incorrect ordering.
+
 ## v1.1.7
 
   - Expose `Capture#statistics` for debugging internal memory tracking state.

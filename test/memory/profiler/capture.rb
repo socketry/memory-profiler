@@ -78,10 +78,10 @@ describe Memory::Profiler::Capture do
 			
 			# Allocate and retain
 			retained = []
-			5.times {retained << {}}
+			5.times {retained << Hash.new}
 			
-			# Allocate and don't retain
-			10.times {{}}
+			# Allocate and don't retain:
+			10.times {Hash.new}
 			
 			# Force GC
 			GC.start
@@ -98,6 +98,34 @@ describe Memory::Profiler::Capture do
 		
 		it "returns 0 for untracked classes" do
 			expect(capture.count_for(String)).to be == 0
+		end
+		
+		it "handles freeing objects allocated before tracking started" do
+			# Disable GC to prevent premature collection:
+			GC.disable
+			
+			# Allocate 100 hashes BEFORE tracking starts:
+			hashes = 100.times.map {Hash.new}
+			
+			# Now start tracking:
+			capture.track(Hash)
+			capture.start
+			
+			# Drop references so they can be collected:
+			hashes = nil
+			
+			# Re-enable GC and run it:
+			GC.start
+			
+			# Stop tracking
+			capture.stop
+			
+			# Count should NOT be negative - should be 0 or positive:
+			# (Objects allocated before tracking don't get negative counts when freed):
+			count = capture.count_for(Hash)
+			expect(count).to be >= 0
+		ensure
+			GC.enable
 		end
 	end
 	
@@ -191,6 +219,181 @@ describe Memory::Profiler::Capture do
 			expect(array_count).to be >= 3
 			
 			capture.stop
+		end
+	end
+	
+	with "multiple capture instances" do
+		it "supports multiple capture instances running simultaneously" do
+			capture1 = Memory::Profiler::Capture.new
+			capture2 = Memory::Profiler::Capture.new
+			
+			capture1.track(Hash)
+			capture2.track(Array)
+			
+			capture1.start
+			capture2.start
+			
+			5.times {{}}
+			3.times {[]}
+			
+			capture1.stop
+			capture2.stop
+			
+			# Both captures automatically track ALL allocations
+			# The track() call is for setting up callbacks, not filtering
+			expect(capture1.count_for(Hash)).to be >= 5
+			expect(capture2.count_for(Array)).to be >= 3
+			
+			# Both instances also see the other classes (automatic tracking)
+			expect(capture1.count_for(Array)).to be >= 3
+			expect(capture2.count_for(Hash)).to be >= 5
+		end
+	end
+	
+	with "callback updates" do
+		it "allows updating callback for already tracked class" do
+			count1 = 0
+			count2 = 0
+			
+			capture.track(Hash) do |klass, event, state|
+				count1 += 1 if event == :newobj
+			end
+			
+			capture.start
+			Hash.new
+			capture.stop
+			
+			# Track again with different callback
+			capture.track(Hash) do |klass, event, state|
+				count2 += 1 if event == :newobj
+			end
+			
+			capture.start
+			Hash.new
+			capture.stop
+			
+			expect(count1).to be >= 1  # First callback called
+			expect(count2).to be >= 1  # Second callback called
+		end
+	end
+	
+	with "start/stop cycles" do
+		it "handles multiple start/stop cycles" do
+			capture.track(Hash)
+			
+			# First cycle
+			capture.start
+			5.times {{}}
+			capture.stop
+			count1 = capture.count_for(Hash)
+			
+			# Second cycle
+			capture.start
+			3.times {{}}
+			capture.stop
+			count2 = capture.count_for(Hash)
+			
+			# Counts should accumulate across cycles
+			expect(count2).to be >= count1 + 3
+		end
+		
+		it "can restart after stop" do
+			capture.track(Hash)
+			
+			capture.start
+			capture.stop
+			
+			# Should be able to start again
+			result = capture.start
+			expect(result).to be == true
+			
+			capture.stop
+		end
+	end
+	
+	with "callback edge cases" do
+		it "handles callback that raises exception gracefully" do
+			capture.track(Hash) do |klass, event, state|
+				raise "boom!" if event == :newobj
+			end
+			
+			capture.start
+			
+			# Should not crash despite exception in callback
+			# Exception is caught by RUBY_EVENT_HOOK_FLAG_SAFE
+			expect {{} }.not.to raise_exception
+			
+			capture.stop
+		end
+		
+		it "handles callback allocating same tracked class" do
+			nested_count = 0
+			
+			capture.track(Hash) do |klass, event, state|
+				# This allocates another Hash during the callback!
+				# The enabled flag prevents infinite recursion
+				if event == :newobj && nested_count < 5
+					nested_count += 1
+					Hash.new  # Allocate Hash in callback
+				end
+			end
+			
+			capture.start
+			Hash.new # Triggers callback which allocates more
+			capture.stop
+			
+			# Should handle nested allocations without infinite loop
+			# enabled flag should prevent recursion
+			expect(nested_count).to be > 0
+			expect(nested_count).to be <= 5  # Should not recurse infinitely
+		end
+	end
+	
+	with "#clear during tracking" do
+		it "can clear while tracking is active" do
+			capture.track(Hash)
+			capture.start
+			
+			10.times {{}}
+			expect(capture.count_for(Hash)).to be > 0
+			
+			capture.clear
+			expect(capture.count_for(Hash)).to be == 0
+			
+			# Continue tracking after clear
+			5.times {{}}
+			expect(capture.count_for(Hash)).to be >= 5
+			
+			capture.stop
+		end
+	end
+	
+	with "#untrack and re-track" do
+		it "handles untrack and re-track of same class" do
+			capture.track(Hash)
+			capture.start
+			5.times {{}}
+			capture.stop
+			
+			count1 = capture.count_for(Hash)
+			expect(count1).to be >= 5
+			
+			capture.untrack(Hash)
+			expect(capture.tracking?(Hash)).to be == false
+			
+			# Untracking should clear the count
+			expect(capture.count_for(Hash)).to be == 0
+			
+			# Re-track same class
+			capture.track(Hash)
+			capture.start
+			3.times {{}}
+			capture.stop
+			
+			count2 = capture.count_for(Hash)
+			# Count should be fresh after re-track
+			expect(count2).to be >= 3
+			expect(count2).to be < count1  # Should be less than first cycle
 		end
 	end
 	
