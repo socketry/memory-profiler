@@ -22,6 +22,10 @@ Please see the [project documentation](https://socketry.github.io/memory-profile
 
 Please see the [project releases](https://socketry.github.io/memory-profiler/releases/index) for all releases.
 
+### v1.1.11
+
+  - Double buffer shared events queues to fix queue corruption.
+
 ### v1.1.10
 
   - Added `Capture#new_count` - returns total number of allocations tracked across all classes.

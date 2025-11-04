@@ -1,6 +1,6 @@
 # Releases
 
-## Unreleased
+## v1.1.11
 
   - Double buffer shared events queues to fix queue corruption.
 
