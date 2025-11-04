@@ -96,13 +96,12 @@ static void Memory_Profiler_Events_mark(void *ptr) {
 	for (size_t i = 0; i < events->queue.count; i++) {
 		struct Memory_Profiler_Event *event = Memory_Profiler_Queue_at(&events->queue, i);
 		
-		// Mark the Capture instance this event belongs to:
+		// Mark the Capture instance and class:
 		rb_gc_mark_movable(event->capture);
 		rb_gc_mark_movable(event->klass);
-		rb_gc_mark_movable(event->allocations);
 		
-		// For NEWOBJ, mark the object (it's alive).
-		// For FREEOBJ, DON'T mark (it's being freed - just used as key for lookup).
+		// For NEWOBJ: mark the object to keep it alive until processor runs
+		// For FREEOBJ: DON'T mark (object is being freed)
 		if (event->type == MEMORY_PROFILER_EVENT_TYPE_NEWOBJ) {
 			rb_gc_mark_movable(event->object);
 		}
@@ -120,10 +119,9 @@ static void Memory_Profiler_Events_compact(void *ptr) {
 		// Update all VALUEs if they moved during compaction:
 		event->capture = rb_gc_location(event->capture);
 		event->klass = rb_gc_location(event->klass);
-		event->allocations = rb_gc_location(event->allocations);
 		
-		// For NEWOBJ, update the object pointer.
-		// For FREEOBJ, DON'T update (it's being freed, pointer is stale).
+		// For NEWOBJ: update object pointer if it moved
+		// For FREEOBJ: DON'T update (object is being freed, pointer is stale)
 		if (event->type == MEMORY_PROFILER_EVENT_TYPE_NEWOBJ) {
 			event->object = rb_gc_location(event->object);
 		}
@@ -147,7 +145,6 @@ int Memory_Profiler_Events_enqueue(
 	enum Memory_Profiler_Event_Type type,
 	VALUE capture,
 	VALUE klass,
-	VALUE allocations,
 	VALUE object
 ) {
 	struct Memory_Profiler_Events *events = Memory_Profiler_Events_instance();
@@ -159,7 +156,6 @@ int Memory_Profiler_Events_enqueue(
 		// Use write barriers when storing VALUEs (required for RUBY_TYPED_WB_PROTECTED):
 		RB_OBJ_WRITE(events->self, &event->capture, capture);
 		RB_OBJ_WRITE(events->self, &event->klass, klass);
-		RB_OBJ_WRITE(events->self, &event->allocations, allocations);
 		RB_OBJ_WRITE(events->self, &event->object, object);
 		
 		const char *type_name = (type == MEMORY_PROFILER_EVENT_TYPE_NEWOBJ) ? "NEWOBJ" : "FREEOBJ";

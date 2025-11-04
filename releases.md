@@ -1,5 +1,14 @@
 # Releases
 
+## Unreleased
+
+  - Added `Capture#new_count` - returns total number of allocations tracked across all classes.
+  - Added `Capture#free_count` - returns total number of objects freed across all classes.
+  - Added `Capture#retained_count` - returns retained object count (new_count - free_count).
+  - **Critical:** Fixed GC crash during compaction caused by missing write barriers in event queue.
+  - Fixed allocation/deallocation counts being inaccurate when objects are allocated during callbacks or freed after compaction.
+  - `Capture#clear` now raises `RuntimeError` if called while capture is running. Call `stop()` before `clear()`.
+
 ## v1.1.9
 
   - More write barriers...

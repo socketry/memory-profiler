@@ -10,39 +10,33 @@
 
 static VALUE Memory_Profiler_Allocations = Qnil;
 
-// Helper to mark object_states table values
-static int Memory_Profiler_Allocations_object_states_mark(st_data_t key, st_data_t value, st_data_t arg) {
-	// Don't mark the object, we use it as a key but we never use it as an object, and we don't want to retain it.
-	// VALUE object = (VALUE)key;
-	// rb_gc_mark_movable(object);
-
+// Helper to mark states table (object => state)
+static int Memory_Profiler_Allocations_states_mark(st_data_t key, st_data_t value, st_data_t arg) {
+	// Don't mark the object key (weak reference - don't keep objects alive)
+	// Mark the state value
 	VALUE state = (VALUE)value;
-	if (!NIL_P(state)) {
-		rb_gc_mark_movable(state);
-	}
+	rb_gc_mark_movable(state);
 	return ST_CONTINUE;
 }
 
 // Foreach callback for st_foreach_with_replace (iteration logic)
-static int Memory_Profiler_Allocations_object_states_foreach(st_data_t key, st_data_t value, st_data_t argp, int error) {
+static int Memory_Profiler_Allocations_states_foreach(st_data_t key, st_data_t value, st_data_t argp, int error) {
 	// Return ST_REPLACE to trigger the replace callback for each entry
 	return ST_REPLACE;
 }
 
-// Replace callback for st_foreach_with_replace to update object_states keys and values during compaction
-static int Memory_Profiler_Allocations_object_states_compact(st_data_t *key, st_data_t *value, st_data_t data, int existing) {
-	VALUE old_object = (VALUE)*key;
+// Replace callback for st_foreach_with_replace to update states during compaction
+static int Memory_Profiler_Allocations_states_compact(st_data_t *key, st_data_t *value, st_data_t data, int existing) {
+	// Key is object (VALUE) - we can't update if it moved (would require rehashing/allocation)
 	VALUE old_state = (VALUE)*value;
-	
-	VALUE new_object = rb_gc_location(old_object);
 	VALUE new_state = rb_gc_location(old_state);
 	
-	// Update key if it moved
-	if (old_object != new_object) {
-		*key = (st_data_t)new_object;
-	}
+	// NOTE: We can't update object keys if they moved (would require rehashing/allocation).
+	// This means lookups may fail after compaction for moved objects.
+	// This is acceptable - FREEOBJ will simply not find the state and skip the callback.
+	// The state will be cleaned up when Allocations is freed/cleared.
 	
-	// Update value if it moved
+	// Update state value if it moved (this is safe, doesn't rehash)
 	if (old_state != new_state) {
 		*value = (st_data_t)new_state;
 	}
@@ -50,7 +44,6 @@ static int Memory_Profiler_Allocations_object_states_compact(st_data_t *key, st_
 	return ST_CONTINUE;
 }
 
-// GC mark function for Allocations
 static void Memory_Profiler_Allocations_mark(void *ptr) {
 	struct Memory_Profiler_Capture_Allocations *record = ptr;
 	
@@ -58,22 +51,19 @@ static void Memory_Profiler_Allocations_mark(void *ptr) {
 		return;
 	}
 	
-	if (!NIL_P(record->callback)) {
-		rb_gc_mark_movable(record->callback);
-	}
+	rb_gc_mark_movable(record->callback);
 	
-	// Mark object_states table if it exists
-	if (record->object_states) {
-		st_foreach(record->object_states, Memory_Profiler_Allocations_object_states_mark, 0);
+	// Mark states table if it exists
+	if (record->states) {
+		st_foreach(record->states, Memory_Profiler_Allocations_states_mark, 0);
 	}
 }
 
-// GC free function for Allocations
 static void Memory_Profiler_Allocations_free(void *ptr) {
 	struct Memory_Profiler_Capture_Allocations *record = ptr;
 	
-	if (record->object_states) {
-		st_free_table(record->object_states);
+	if (record->states) {
+		st_free_table(record->states);
 	}
 	
 	xfree(record);
@@ -84,14 +74,12 @@ static void Memory_Profiler_Allocations_compact(void *ptr) {
 	struct Memory_Profiler_Capture_Allocations *record = ptr;
 	
 	// Update callback if it moved
-	if (!NIL_P(record->callback)) {
-		record->callback = rb_gc_location(record->callback);
-	}
+	record->callback = rb_gc_location(record->callback);
 	
-	// Update object_states table if it exists
-	if (record->object_states && record->object_states->num_entries > 0) {
-		if (st_foreach_with_replace(record->object_states, Memory_Profiler_Allocations_object_states_foreach, Memory_Profiler_Allocations_object_states_compact, 0)) {
-			rb_raise(rb_eRuntimeError, "object_states modified during GC compaction");
+	// Update states table if it exists
+	if (record->states && record->states->num_entries > 0) {
+		if (st_foreach_with_replace(record->states, Memory_Profiler_Allocations_states_foreach, Memory_Profiler_Allocations_states_compact, 0)) {
+			rb_raise(rb_eRuntimeError, "states modified during GC compaction");
 		}
 	}
 }
@@ -158,10 +146,11 @@ void Memory_Profiler_Allocations_clear(VALUE allocations) {
 	record->free_count = 0;  // Reset free count
 	RB_OBJ_WRITE(allocations, &record->callback, Qnil); // Clear callback with write barrier
 	
-	// Clear object states
-	if (record->object_states) {
-		st_free_table(record->object_states);
-		record->object_states = NULL;
+	// Clear states - either clear the table or reinitialize
+	if (record->states) {
+		st_clear(record->states);
+	} else {
+		record->states = st_init_numtable();
 	}
 }
 

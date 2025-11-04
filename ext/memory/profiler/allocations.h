@@ -17,9 +17,9 @@ struct Memory_Profiler_Capture_Allocations {
 	size_t free_count;
 	// Live count = new_count - free_count.
 	
-	// For detailed tracking: map object (VALUE) => state (VALUE).
-	// State is returned from callback on `newobj` and passed back on `freeobj`.
-	st_table *object_states;
+	// Map object (VALUE) => state (VALUE).
+	// Object keys need compaction updates when they move.
+	st_table *states;
 };
 
 // Wrap an allocations record in a VALUE.

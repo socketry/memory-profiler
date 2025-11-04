@@ -195,11 +195,10 @@ describe Memory::Profiler::Capture do
 			
 			expect(capture.count_for(Hash)).to be > 0
 			
+			capture.stop
 			capture.clear
 			
 			expect(capture.count_for(Hash)).to be == 0
-			
-			capture.stop
 		end
 	end
 	
@@ -349,22 +348,108 @@ describe Memory::Profiler::Capture do
 		end
 	end
 	
+	with "#new_count, #free_count, #retained_count" do
+		it "tracks total allocations across all classes" do
+			capture.start
+			
+			# Allocate various objects
+			10.times{Hash.new}
+			5.times{Array.new}
+			3.times{String.new("test")}
+			
+			capture.stop
+			
+			# new_count should be at least 18 (10+5+3)
+			expect(capture.new_count).to be >= 18
+			
+			# free_count should be >= 0
+			expect(capture.free_count).to be >= 0
+			
+			# retained_count = new_count - free_count
+			expect(capture.retained_count).to be == capture.new_count - capture.free_count
+		end
+		
+		it "tracks frees when objects are collected" do
+			GC.start
+			
+			capture.start
+			
+			initial_new = capture.new_count
+			initial_free = capture.free_count
+			
+			# Allocate without retaining
+			50.times{Hash.new}
+			
+			new_after_alloc = capture.new_count
+			expect(new_after_alloc).to be >= initial_new + 50
+			
+			# Force GC to collect unreferenced hashes
+			3.times{GC.start}
+			
+			free_after_gc = capture.free_count
+			expect(free_after_gc).to be > initial_free
+			
+			capture.stop
+		end
+		
+		it "retained_count reflects objects still alive" do
+			GC.start
+			
+			capture.start
+			
+			# Allocate and retain some objects
+			retained = []
+			10.times{retained << Hash.new}
+			
+			# Allocate without retaining
+			50.times{Hash.new}
+			
+			# Force GC
+			3.times{GC.start}
+			
+			capture.stop
+			
+			# retained_count should be >= 10 (our retained objects)
+			# It may be higher due to other system allocations
+			expect(capture.retained_count).to be >= 10
+			
+			# Verify the formula
+			expect(capture.retained_count).to be == capture.new_count - capture.free_count
+		end
+		
+		it "counts reset after clear" do
+			capture.start
+			
+			20.times{Hash.new}
+			
+			capture.stop
+			
+			expect(capture.new_count).to be > 0
+			
+			capture.clear
+			
+			expect(capture.new_count).to be == 0
+			expect(capture.free_count).to be == 0
+			expect(capture.retained_count).to be == 0
+		end
+	end
+	
 	with "#clear during tracking" do
-		it "can clear while tracking is active" do
+		it "raises error when clearing while running" do
 			capture.track(Hash)
 			capture.start
 			
 			10.times{{}}
 			expect(capture.count_for(Hash)).to be > 0
 			
-			capture.clear
-			expect(capture.count_for(Hash)).to be == 0
-			
-			# Continue tracking after clear
-			5.times{{}}
-			expect(capture.count_for(Hash)).to be >= 5
+			# Should raise an error since capture is still running
+			expect{capture.clear}.to raise_exception(RuntimeError)
 			
 			capture.stop
+			
+			# Now clear should work
+			capture.clear
+			expect(capture.count_for(Hash)).to be == 0
 		end
 	end
 	
@@ -513,6 +598,111 @@ describe Memory::Profiler::Capture do
 			rescue NotImplementedError
 				# Compaction not available on this Ruby version
 			end
+		end
+		
+		it "handles GC compaction with FREEOBJ events and state" do
+			# This test specifically targets the bug where FREEOBJ events
+			# kept dying object pointers in object_states during compaction.
+			# The fix removes state from object_states immediately in the handler.
+			
+			freed_count = 0
+			allocated_count = 0
+			
+			capture.track(Hash) do |klass, event, state|
+				if event == :newobj
+					allocated_count += 1
+					# Return state to be tracked
+					# The enabled flag prevents this allocation from being tracked recursively
+					{allocated_at: Time.now.to_i, index: allocated_count}
+				elsif event == :freeobj
+					freed_count += 1
+					# State should be the hash we returned from newobj
+					expect(state).to be_a(Hash)
+					expect(state[:index]).to be_a(Integer)
+				end
+			end
+			
+			capture.start
+			
+			# Allocate objects that will survive
+			survivors = []
+			20.times do |i|
+				survivors << Hash.new
+			end
+			
+			# Force them to old generation
+			3.times{GC.start}
+			
+			# Now allocate many objects that won't survive
+			100.times do
+				Hash.new  # These will be freed
+			end
+			
+			# Trigger GC to free the unreferenced hashes
+			# This queues FREEOBJ events
+			3.times{GC.start}
+			
+			# Now trigger compaction BEFORE processing the event queue
+			# Without our fix, this would try to compact dead object pointers
+			begin
+				GC.verify_compaction_references(expand_heap: true, toward: :empty)
+			rescue NotImplementedError
+				skip "GC compaction not available"
+			end
+			
+			# Stop to process queued events
+			capture.stop
+			
+			# Verify callbacks were called
+			expect(allocated_count).to be >= 100
+			expect(freed_count).to be > 0
+			
+			# Final compaction to ensure everything is still valid
+			begin
+				GC.verify_compaction_references(expand_heap: true, toward: :empty)
+			rescue NotImplementedError
+				# Already skipped above
+			end
+		end
+		
+		it "handles compaction with events still in queue" do
+			# Test that compaction works even when events haven't been processed yet
+			# This exercises the write barriers and ensures queue contents are valid
+			
+			capture.track(Array)
+			capture.start
+			
+			# Allocate many objects rapidly
+			# Some events may still be queued when we trigger compaction
+			objects = []
+			200.times do
+				objects << Array.new(10)
+			end
+			
+			# Immediately trigger compaction (events likely still queued)
+			begin
+				GC.verify_compaction_references(expand_heap: true, toward: :empty)
+			rescue NotImplementedError
+				skip "GC compaction not available"
+			end
+			
+			# Now let some objects die
+			objects = objects[0..50]  # Keep only first 51
+			
+			# Trigger GC to free unreferenced arrays
+			3.times{GC.start}
+			
+			# Compact again with FREEOBJ events queued
+			begin
+				GC.verify_compaction_references(expand_heap: true, toward: :empty)
+			rescue NotImplementedError
+				# Already skipped above
+			end
+			
+			capture.stop
+			
+			# Should not have crashed
+			expect(capture.count_for(Array)).to be >= 0
 		end
 	end
 end

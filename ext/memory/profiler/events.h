@@ -22,10 +22,7 @@ struct Memory_Profiler_Event {
 	// The class of the object:
 	VALUE klass;
 
-	// The Allocations wrapper:
-	VALUE allocations;
-
-	// The object itself:
+	// The object itself (for NEWOBJ and FREEOBJ):
 	VALUE object;
 };
 
@@ -39,7 +36,6 @@ int Memory_Profiler_Events_enqueue(
 	enum Memory_Profiler_Event_Type type,
 	VALUE capture,
 	VALUE klass,
-	VALUE allocations,
 	VALUE object
 );
 
