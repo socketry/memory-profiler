@@ -69,9 +69,9 @@ end
 
 # Generate allocations
 retained_hashes = []
-50.times {retained_hashes << allocate_in_method_a}
-30.times {retained_hashes << allocate_in_method_b}
-20.times {retained_hashes << deep_allocation}
+50.times{retained_hashes << allocate_in_method_a}
+30.times{retained_hashes << allocate_in_method_b}
+20.times{retained_hashes << deep_allocation}
 
 # Analyze
 statistics = sampler.statistics(Hash)
@@ -87,7 +87,7 @@ if statistics
 		total = path_data[:total_count]
 		retained = path_data[:retained_count]
 		puts "\n  #{i + 1}. Total: #{total}, Retained: #{retained} (#{(retained * 100.0 / total).round(1)}% kept)"
-		path_data[:path].first(3).each {|frame| puts "       #{frame}"}
+		path_data[:path].first(3).each{|frame| puts "       #{frame}"}
 	end
 	
 	puts "\n  Hotspot Frames (by retained count):"

@@ -79,7 +79,7 @@ module Memory
 					end
 					
 					# Now recursively prune the retained children (avoid pruning nodes we just discarded)
-					@children.each_value {|child| pruned_count += child.prune!(limit)}
+					@children.each_value{|child| pruned_count += child.prune!(limit)}
 					
 					# Clean up if we ended up with no children
 					@children = nil if @children.empty?
@@ -98,7 +98,7 @@ module Memory
 					
 					# Recursively detach all children first and sum their counts
 					if @children
-						@children.each_value {|child| count += child.detach!}
+						@children.each_value{|child| count += child.detach!}
 					end
 					
 					# Break all references
@@ -192,13 +192,13 @@ module Memory
 				
 				@root.each_path do |path, total_count, retained_count|
 					# Filter out root node (has nil location) and map to location strings
-					locations = path.select(&:location).map {|node| node.location.to_s}
+					locations = path.select(&:location).map{|node| node.location.to_s}
 					paths << [locations, total_count, retained_count] unless locations.empty?
 				end
 				
 				# Sort by the requested metric (default: retained, since that's what matters for leaks)
 				sort_index = (by == :total) ? 1 : 2
-				paths.sort_by {|path_data| -path_data[sort_index]}.first(limit)
+				paths.sort_by{|path_data| -path_data[sort_index]}.first(limit)
 			end
 			
 			# Get hotspot locations (individual frames with highest counts).
@@ -207,13 +207,13 @@ module Memory
 			# @parameter by [Symbol] Sort by :total or :retained count.
 			# @returns [Hash] Map of location => [total_count, retained_count].
 			def hotspots(limit = 20, by: :retained)
-				frames = Hash.new {|h, k| h[k] = [0, 0]}
+				frames = Hash.new{|h, k| h[k] = [0, 0]}
 				
 				collect_frames(@root, frames)
 				
 				# Sort by the requested metric
 				sort_index = (by == :total) ? 0 : 1
-				frames.sort_by {|_, counts| -counts[sort_index]}.first(limit).to_h
+				frames.sort_by{|_, counts| -counts[sort_index]}.first(limit).to_h
 			end
 			
 			# Total number of allocations tracked.
@@ -255,7 +255,7 @@ module Memory
 					frames[location_str][1] += node.retained_count
 				end
 				
-				node.each_child {|child| collect_frames(child, frames)}
+				node.each_child{|child| collect_frames(child, frames)}
 			end
 		end
 	end

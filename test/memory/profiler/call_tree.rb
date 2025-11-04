@@ -181,9 +181,9 @@ describe Memory::Profiler::CallTree do
 	with "#prune!" do
 		it "keeps top N children by retained count" do
 			# Create paths with different retention
-			10.times {tree.record([Location.new("high.rb", 1, "leak")])}
-			5.times {tree.record([Location.new("medium.rb", 2, "moderate")])}
-			2.times {tree.record([Location.new("low.rb", 3, "small")])}
+			10.times{tree.record([Location.new("high.rb", 1, "leak")])}
+			5.times{tree.record([Location.new("medium.rb", 2, "moderate")])}
+			2.times{tree.record([Location.new("low.rb", 3, "small")])}
 			
 			expect(tree.total_allocations).to be == 17
 			expect(tree.retained_allocations).to be == 17
@@ -215,9 +215,9 @@ describe Memory::Profiler::CallTree do
 			a2 = Location.new("a2.rb", 20, "a2")
 			b1 = Location.new("b1.rb", 30, "b1")
 			
-			10.times {tree.record([a, a1])}
-			5.times {tree.record([a, a2])}
-			3.times {tree.record([b, b1])}
+			10.times{tree.record([a, a1])}
+			5.times{tree.record([a, a2])}
+			3.times{tree.record([b, b1])}
 			
 			expect(tree.total_allocations).to be == 18
 			
@@ -239,8 +239,8 @@ describe Memory::Profiler::CallTree do
 		end
 		
 		it "does nothing when children <= limit" do
-			3.times {tree.record([Location.new("a.rb", 1, "foo")])}
-			2.times {tree.record([Location.new("b.rb", 2, "bar")])}
+			3.times{tree.record([Location.new("a.rb", 1, "foo")])}
+			2.times{tree.record([Location.new("b.rb", 2, "bar")])}
 			
 			# Prune with limit >= children count
 			tree.prune!(5)
@@ -260,7 +260,7 @@ describe Memory::Profiler::CallTree do
 		end
 		
 		it "tracks insertion count" do
-			5.times {tree.record([Location.new("a.rb", 1, "foo")])}
+			5.times{tree.record([Location.new("a.rb", 1, "foo")])}
 			expect(tree.insertion_count).to be == 5
 			
 			# Pruning doesn't reset counter (manual control)
@@ -271,17 +271,17 @@ describe Memory::Profiler::CallTree do
 			tree.insertion_count = 0
 			expect(tree.insertion_count).to be == 0
 			
-			3.times {tree.record([Location.new("b.rb", 2, "bar")])}
+			3.times{tree.record([Location.new("b.rb", 2, "bar")])}
 			expect(tree.insertion_count).to be == 3
 		end
 		
 		it "detaches pruned nodes to aid GC" do
 			# Create nodes that will be pruned
 			high_node = tree.record([Location.new("high.rb", 1, "keep")])
-			10.times {tree.record([Location.new("high.rb", 1, "keep")])}
+			10.times{tree.record([Location.new("high.rb", 1, "keep")])}
 			
 			low_node = tree.record([Location.new("low.rb", 2, "discard")])
-			2.times {tree.record([Location.new("low.rb", 2, "discard")])}
+			2.times{tree.record([Location.new("low.rb", 2, "discard")])}
 			
 			# Before pruning, low_node has parent/location references
 			expect(low_node.parent).not.to be_nil

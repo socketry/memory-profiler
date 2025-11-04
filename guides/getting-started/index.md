@@ -73,7 +73,7 @@ puts "Total allocation sites: #{stats[:total_allocations]}"
 
 stats[:top_paths].each do |path_data|
 	puts "\n#{path_data[:count]} allocations from:"
-	path_data[:path].each {|frame| puts "  #{frame}"}
+	path_data[:path].each{|frame| puts "  #{frame}"}
 end
 
 # Stop tracking
@@ -115,7 +115,7 @@ if stats = profiler.stats(Array)
 	
 	stats[:top_paths].each do |path_data|
 		puts "\n  #{path_data[:count]}x from:"
-		path_data[:path].each {|frame| puts "    #{frame}"}
+		path_data[:path].each{|frame| puts "    #{frame}"}
 	end
 end
 
@@ -168,7 +168,7 @@ class MemoryMonitor
 		
 		stats[:top_paths].first(3).each do |path_data|
 			puts "\n#{path_data[:count]} allocations from:"
-			path_data[:path].each {|frame| puts "  <- #{frame}"}
+			path_data[:path].each{|frame| puts "  <- #{frame}"}
 		end
 	end
 end

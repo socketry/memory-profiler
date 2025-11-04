@@ -249,11 +249,11 @@ module Memory
 					live_count: @capture.count_for(klass),
 					total_allocations: tree.total_allocations,
 					retained_allocations: tree.retained_allocations,
-					top_paths: tree.top_paths(10).map {|path, total, retained| 
-						{ path: path, total_count: total, retained_count: retained }
+					top_paths: tree.top_paths(10).map{|path, total, retained| 
+						{path: path, total_count: total, retained_count: retained}
 					},
-					hotspots: tree.hotspots(20).transform_values {|total, retained|
-						{ total_count: total, retained_count: retained }
+					hotspots: tree.hotspots(20).transform_values{|total, retained|
+						{total_count: total, retained_count: retained}
 					}
 				}
 			end
