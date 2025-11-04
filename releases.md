@@ -1,5 +1,9 @@
 # Releases
 
+## Unreleased
+
+  - Double buffer shared events queues to fix queue corruption.
+
 ## v1.1.10
 
   - Added `Capture#new_count` - returns total number of allocations tracked across all classes.

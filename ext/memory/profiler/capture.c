@@ -26,7 +26,7 @@ struct Memory_Profiler_Capture {
 	int running;
 	
 	// Should we queue callbacks? (temporarily disabled during queue processing).
-	int enabled;
+	int paused;
 
 	// Tracked classes: class => VALUE (wrapped Memory_Profiler_Capture_Allocations).
 	st_table *tracked_classes;
@@ -142,6 +142,9 @@ static void Memory_Profiler_Capture_process_newobj(VALUE capture_value, VALUE kl
 	struct Memory_Profiler_Capture *capture;
 	TypedData_Get_Struct(capture_value, struct Memory_Profiler_Capture, &Memory_Profiler_Capture_type, capture);
 	
+	// Pause the capture to prevent infinite loop:
+	capture->paused += 1;
+	
 	// Increment global new count:
 	capture->new_count++;
 	
@@ -171,13 +174,7 @@ static void Memory_Profiler_Capture_process_newobj(VALUE capture_value, VALUE kl
 	
 	// Only store state if there's a callback
 	if (!NIL_P(record->callback)) {
-		// Temporarily disable queueing to prevent infinite loop
-		int was_enabled = capture->enabled;
-		capture->enabled = 0;
-		
 		VALUE state = rb_funcall(record->callback, rb_intern("call"), 3, klass, sym_newobj, Qnil);
-		
-		capture->enabled = was_enabled;
 		
 		// Store state using object as key (works because object is alive):
 		st_insert(record->states, (st_data_t)object, (st_data_t)state);
@@ -185,6 +182,9 @@ static void Memory_Profiler_Capture_process_newobj(VALUE capture_value, VALUE kl
 		// Store state as nil:
 		st_insert(record->states, (st_data_t)object, (st_data_t)Qnil);
 	}
+
+	// Resume the capture:
+	capture->paused -= 1;
 }
 
 // Process a FREEOBJ event. All deallocation tracking logic is here.
@@ -192,11 +192,14 @@ static void Memory_Profiler_Capture_process_freeobj(VALUE capture_value, VALUE k
 	struct Memory_Profiler_Capture *capture;
 	TypedData_Get_Struct(capture_value, struct Memory_Profiler_Capture, &Memory_Profiler_Capture_type, capture);
 	
+	// Pause the capture to prevent infinite loop:
+	capture->paused += 1;
+	
 	// Look up allocations record for this class
 	st_data_t allocations_data;
 	if (!st_lookup(capture->tracked_classes, (st_data_t)klass, &allocations_data)) {
 		// The class is not tracked, so we are not tracking this object.
-		return;
+		goto done;
 	}
 	
 	VALUE allocations = (VALUE)allocations_data;
@@ -204,32 +207,27 @@ static void Memory_Profiler_Capture_process_freeobj(VALUE capture_value, VALUE k
 	
 	if (!record->states) {
 		// There is no state table for this class, so we are not tracking it.
-		return;
+		goto done;
 	}
 	
 	st_data_t state_data;
-	if (!st_delete(record->states, (st_data_t *)&object, &state_data)) {
-		// There is no state for this object, so we are not tracking it.
-		return;
+	if (st_delete(record->states, (st_data_t *)&object, &state_data)) {
+		VALUE state = (VALUE)state_data;
+		
+		// Increment global free count
+		capture->free_count++;
+		
+		// Increment per-class free count
+		record->free_count++;
+		
+		if (!NIL_P(record->callback) && !NIL_P(state)) {
+			rb_funcall(record->callback, rb_intern("call"), 3, klass, sym_freeobj, state);
+		}
 	}
 
-	VALUE state = (VALUE)state_data;
-
-	// Increment global free count
-	capture->free_count++;
-	
-	// Increment per-class free count
-	record->free_count++;
-	
-	if (!NIL_P(record->callback) && !NIL_P(state)) {
-		// Temporarily disable queueing to prevent infinite loop
-		int was_enabled = capture->enabled;
-		capture->enabled = 0;
-		
-		rb_funcall(record->callback, rb_intern("call"), 3, klass, sym_freeobj, state);
-		
-		capture->enabled = was_enabled;
-	}
+done:
+	// Resume the capture:
+	capture->paused -= 1;
 }
 
 // Process a single event (NEWOBJ or FREEOBJ). Called from events.c via rb_protect to catch exceptions.
@@ -240,6 +238,9 @@ void Memory_Profiler_Capture_process_event(struct Memory_Profiler_Event *event) 
 			break;
 		case MEMORY_PROFILER_EVENT_TYPE_FREEOBJ:
 			Memory_Profiler_Capture_process_freeobj(event->capture, event->klass, event->object);
+			break;
+		default:
+			// Ignore.
 			break;
 	}
 }
@@ -299,7 +300,7 @@ static void Memory_Profiler_Capture_event_callback(VALUE data, void *ptr) {
 	
 	if (event_flag == RUBY_INTERNAL_EVENT_NEWOBJ) {
 		// Skip NEWOBJ if disabled (during callback) to prevent infinite recursion
-		if (!capture->enabled) return;
+		if (capture->paused) return;
 		
 		Memory_Profiler_Events_enqueue(MEMORY_PROFILER_EVENT_TYPE_NEWOBJ, data, klass, object);
 	} else if (event_flag == RUBY_INTERNAL_EVENT_FREEOBJ) {
@@ -329,7 +330,7 @@ static VALUE Memory_Profiler_Capture_alloc(VALUE klass) {
 	
 	// Initialize state flags - not running, callbacks disabled
 	capture->running = 0;
-	capture->enabled = 0;
+	capture->paused = 0;
 	
 	// Global event queue system will auto-initialize on first use (lazy initialization)
 	
@@ -362,7 +363,7 @@ static VALUE Memory_Profiler_Capture_start(VALUE self) {
 	
 	// Set both flags - we're now running and callbacks are enabled
 	capture->running = 1;
-	capture->enabled = 1;
+	capture->paused = 0;
 	
 	return Qtrue;
 }
@@ -383,7 +384,7 @@ static VALUE Memory_Profiler_Capture_stop(VALUE self) {
 	
 	// Clear both flags - we're no longer running and callbacks are disabled
 	capture->running = 0;
-	capture->enabled = 0;
+	capture->paused = 0;
 	
 	return Qtrue;
 }
