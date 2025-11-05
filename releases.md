@@ -1,5 +1,10 @@
 # Releases
 
+## Unreleased
+
+  - Enable custom `depth:` and `filter:` options to `Sampler#track`.
+  - Change default filter to no-op.
+
 ## v1.1.15
 
   - Ignore `freeobj` for classes that are not being tracked.

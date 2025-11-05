@@ -188,14 +188,12 @@ module Memory
 			# Start tracking with call path analysis.
 			#
 			# @parameter klass [Class] The class to track with detailed analysis.
-			def track(klass, allocations = nil)
+			def track(klass, allocations = nil, filter: @filter, depth: @depth)
 				# Track the class and get the allocations object
 				allocations ||= @capture.track(klass)
 				
 				# Set up call tree for this class
 				tree = @call_trees[klass] = CallTree.new
-				depth = @depth
-				filter = @filter
 				
 				# Register callback on allocations object:
 				# - On :newobj - returns state (leaf node) which C extension stores
@@ -293,8 +291,9 @@ module Memory
 			
 		private
 			
+			# Default filter to include all locations.
 			def default_filter
-				->(location) {!location.path.match?(%r{/(gems|ruby)/|\A\(eval\)})}
+				->(location) {true}
 			end
 			
 			def prune_call_trees!
