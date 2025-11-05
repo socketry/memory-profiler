@@ -31,6 +31,7 @@ static void Memory_Profiler_Events_mark(void *ptr);
 static void Memory_Profiler_Events_compact(void *ptr);
 static void Memory_Profiler_Events_free(void *ptr);
 static size_t Memory_Profiler_Events_memsize(const void *ptr);
+static const char *Memory_Profiler_Event_Type_name(enum Memory_Profiler_Event_Type type);
 
 // TypedData definition for Events.
 static const rb_data_type_t Memory_Profiler_Events_type = {
@@ -104,7 +105,15 @@ static void Memory_Profiler_Events_mark_queue(struct Memory_Profiler_Queue *queu
 		
 		// Mark the Capture instance and class:
 		rb_gc_mark_movable(event->capture);
-		rb_gc_mark_movable(event->klass);
+		
+		if (rb_type(event->klass) == T_NONE) {
+			int klass_type = rb_type(event->klass);
+			int obj_type = event->object ? rb_type(event->object) : -1;
+			
+			fprintf(stderr, "{\"subject\":\"Memory::Profiler::Events\",\"error\":\"T_NONE\",\"function\":\"mark\",\"event_type\":\"%s\",\"event_index\":%zu,\"queue_count\":%zu,\"skip_none\":%d,\"klass\":\"%p\",\"klass_type\":%d,\"object\":\"%p\",\"object_type\":%d,\"capture\":\"%p\"}\n", Memory_Profiler_Event_Type_name(event->type), i, queue->count, skip_none, (void*)event->klass, klass_type, (void*)event->object, obj_type, (void*)event->capture);
+		} else {
+			rb_gc_mark_movable(event->klass);
+		}
 		
 		// For NEWOBJ: mark the object to keep it alive until processor runs
 		// For FREEOBJ: DON'T mark (object is being freed)
@@ -133,7 +142,6 @@ static void Memory_Profiler_Events_compact_queue(struct Memory_Profiler_Queue *q
 		// Skip already-processed events if requested:
 		if (skip_none && event->type == MEMORY_PROFILER_EVENT_TYPE_NONE) continue;
 		
-		// Update all VALUEs if they moved during compaction:
 		event->capture = rb_gc_location(event->capture);
 		event->klass = rb_gc_location(event->klass);
 		event->object = rb_gc_location(event->object);
@@ -190,6 +198,10 @@ int Memory_Profiler_Events_enqueue(
 	struct Memory_Profiler_Event *event = Memory_Profiler_Queue_push(events->available);
 	if (event) {
 		event->type = type;
+
+		if (rb_type(klass) == T_NONE) {
+			fprintf(stderr, "{\"subject\":\"Memory::Profiler::Events\",\"error\":\"T_NONE\",\"function\":\"enqueue\",\"event_type\":\"%s\",\"capture\":\"%p\",\"klass\":\"%p\",\"object\":\"%p\"}\n", Memory_Profiler_Event_Type_name(type), (void*)capture, (void*)klass, (void*)object);
+		}
 		
 		// Use write barriers when storing VALUEs (required for RUBY_TYPED_WB_PROTECTED):
 		RB_OBJ_WRITE(events->self, &event->capture, capture);

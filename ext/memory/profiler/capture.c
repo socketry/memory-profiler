@@ -298,6 +298,14 @@ static void Memory_Profiler_Capture_event_callback(VALUE data, void *ptr) {
 	VALUE klass = rb_class_of(object);
 	if (!klass) return;
 	
+	if (DEBUG) {
+		const char *klass_name = "(ignored)";
+		if (event_flag == RUBY_INTERNAL_EVENT_NEWOBJ) {
+			klass_name = rb_class2name(klass);
+		}
+		fprintf(stderr, "Memory_Profiler_Capture_event_callback: object=%p, event_flag=%s, klass=%s\n", (void*)object, event_flag_name(event_flag), klass_name);
+	}
+
 	if (event_flag == RUBY_INTERNAL_EVENT_NEWOBJ) {
 		// Skip NEWOBJ if disabled (during callback) to prevent infinite recursion
 		if (capture->paused) return;
