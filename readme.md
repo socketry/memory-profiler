@@ -22,6 +22,10 @@ Please see the [project documentation](https://socketry.github.io/memory-profile
 
 Please see the [project releases](https://socketry.github.io/memory-profiler/releases/index) for all releases.
 
+### v1.1.15
+
+  - Ignore `freeobj` for classes that are not being tracked.
+
 ### v1.1.14
 
   - Ignore `freeobj` events for objects with anonymous classes that are not tracked (and thus become `T_NONE`).
@@ -65,10 +69,6 @@ Please see the [project releases](https://socketry.github.io/memory-profiler/rel
   - Write barriers all the things.
   - Better state handling and object increment/decrement counting.
   - Better call tree handling - including support for `prune!`.
-
-### v1.1.5
-
-  - Use queue for `newobj` too to avoid invoking user code during object allocation.
 
 ## Contributing
 

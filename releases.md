@@ -1,6 +1,6 @@
 # Releases
 
-## Unreleased
+## v1.1.15
 
   - Ignore `freeobj` for classes that are not being tracked.
 
