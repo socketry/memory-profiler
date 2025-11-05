@@ -7,6 +7,7 @@ require "console"
 require "objspace"
 
 require_relative "capture"
+require_relative "allocations"
 require_relative "call_tree"
 
 module Memory
@@ -244,7 +245,7 @@ module Memory
 			
 			# Get live object count for a class.
 			def count(klass)
-				@capture.count_for(klass)
+				@capture.retained_count_of(klass)
 			end
 			
 			# Get the call tree for a specific class.
@@ -256,29 +257,20 @@ module Memory
 			#
 			# @parameter klass [Class] The class to get statistics for.
 			# @returns [Hash] Statistics including total, retained, paths, and hotspots.
-			def statistics(klass)
-				tree = @call_trees[klass]
-				return nil unless tree
+			def analyze(klass)
+				call_tree = @call_trees[klass]
+				allocations = @capture[klass]
+				
+				return nil unless call_tree or allocations
 				
 				{
-					live_count: @capture.count_for(klass),
-					total_allocations: tree.total_allocations,
-					retained_allocations: tree.retained_allocations,
-					top_paths: tree.top_paths(10).map{|path, total, retained| 
-						{path: path, total_count: total, retained_count: retained}
-					},
-					hotspots: tree.hotspots(20).transform_values{|total, retained|
-						{total_count: total, retained_count: retained}
-					}
+					allocations: allocations&.as_json,
+					call_tree: call_tree&.as_json
 				}
 			end
 			
-			# Get statistics for all tracked classes.
-			def all_statistics
-				@call_trees.keys.each_with_object({}) do |klass, result|
-					result[klass] = statistics(klass) if tracking?(klass)
-				end
-			end
+			# @deprecated Use {analyze} instead.
+			alias statistics analyze
 			
 			# Clear tracking data for a class.
 			def clear(klass)

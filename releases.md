@@ -1,5 +1,17 @@
 # Releases
 
+## Unreleased
+
+  - **Breaking**: Renamed `Capture#count_for` to `Capture#retained_count_of` for better clarity and consistency.
+  - **Breaking**: Changed `CallTree#top_paths(limit)` to `CallTree#top_paths(limit:)` - now uses keyword argument.
+  - **Breaking**: Changed `CallTree#hotspots(limit)` to `CallTree#hotspots(limit:)` - now uses keyword argument.
+  - Simplified `Sampler#analyze` return structure to `{allocations: {...}, call_tree: {...}}` format.
+  - Added `Allocations#as_json` and `Allocations#to_json` methods for JSON serialization.
+  - Added `CallTree#as_json` and `CallTree#to_json` methods for JSON serialization with configurable options.
+  - `Memory::Profiler::Allocations.new` can now be instantiated directly (primarily for testing).
+  - `Sampler#statistics` is now a deprecated alias for `Sampler#analyze`.
+  - **Breaking**: Removed `Sampler#all_statistics` method.
+
 ## v1.2.0
 
   - Enable custom `depth:` and `filter:` options to `Sampler#track`.

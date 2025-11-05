@@ -42,7 +42,7 @@ describe Memory::Profiler::CallTree do
 			
 			expect(tree.total_allocations).to be == 2
 			
-			paths = tree.top_paths(10)
+			paths = tree.top_paths(limit: 10)
 			expect(paths.length).to be == 2
 		end
 		
@@ -67,7 +67,7 @@ describe Memory::Profiler::CallTree do
 			expect(tree.total_allocations).to be == 15
 			
 			# Should have deduped the common root "a.rb:1"
-			hotspots = tree.hotspots(10)
+			hotspots = tree.hotspots(limit: 10)
 			total, retained = hotspots[a_rb.to_s]
 			expect(total).to be == 15  # Both paths share this
 			expect(retained).to be == 15  # All retained (no frees)
@@ -84,7 +84,7 @@ describe Memory::Profiler::CallTree do
 				tree.record([Location.new("b.rb", 2, "bar")])
 			end
 			
-			paths = tree.top_paths(10)
+			paths = tree.top_paths(limit: 10)
 			
 			# top_paths now returns [locations, total_count, retained_count]
 			expect(paths.first[1]).to be == 10  # Top path has 10 total allocations
@@ -107,7 +107,7 @@ describe Memory::Profiler::CallTree do
 				tree.record([b_rb])
 			end
 			
-			hotspots = tree.hotspots(10)
+			hotspots = tree.hotspots(limit: 10)
 			total_a, retained_a = hotspots[a_rb.to_s]
 			total_b, retained_b = hotspots[b_rb.to_s]
 			
@@ -167,7 +167,7 @@ describe Memory::Profiler::CallTree do
 			expect(tree.retained_allocations).to be == 0
 			
 			# Verify hotspots show the decrement
-			hotspots = tree.hotspots(10)
+			hotspots = tree.hotspots(limit: 10)
 			location1_total, location1_retained = hotspots[location1.to_s]
 			location2_total, location2_retained = hotspots[location2.to_s]
 			
@@ -197,7 +197,7 @@ describe Memory::Profiler::CallTree do
 			expect(tree.retained_allocations).to be == 17
 			
 			# But only 2 paths should remain (top by retained count)
-			paths = tree.top_paths(10)
+			paths = tree.top_paths(limit: 10)
 			expect(paths.size).to be == 2
 			expect(paths[0][2]).to be == 10  # high.rb
 			expect(paths[1][2]).to be == 5   # medium.rb
@@ -227,7 +227,7 @@ describe Memory::Profiler::CallTree do
 			# Should keep only path a -> a1 (highest retained)
 			# a has 15 total (10+5), b has 3, so a wins
 			# a1 has 10, a2 has 5, so a1 wins
-			paths = tree.top_paths(10)
+			paths = tree.top_paths(limit: 10)
 			expect(paths.size).to be == 1
 			expect(paths[0][0]).to be == [a.to_s, a1.to_s]
 			expect(paths[0][2]).to be == 10  # retained count
@@ -245,7 +245,7 @@ describe Memory::Profiler::CallTree do
 			# Prune with limit >= children count
 			tree.prune!(5)
 			
-			paths = tree.top_paths(10)
+			paths = tree.top_paths(limit: 10)
 			expect(paths.size).to be == 2  # Both kept
 		end
 		

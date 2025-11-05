@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 require_relative "../lib/memory/profiler"
 
 # ruby -I ext ./test.rb

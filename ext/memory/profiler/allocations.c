@@ -143,13 +143,24 @@ void Memory_Profiler_Allocations_clear(VALUE allocations) {
 	}
 }
 
+// Allocate a new Allocations object (for testing)
+static VALUE Memory_Profiler_Allocations_allocate(VALUE klass) {
+	struct Memory_Profiler_Capture_Allocations *record = ALLOC(struct Memory_Profiler_Capture_Allocations);
+	record->callback = Qnil;
+	record->new_count = 0;
+	record->free_count = 0;
+	record->states = st_init_numtable();
+	
+	return Memory_Profiler_Allocations_wrap(record);
+}
+
 void Init_Memory_Profiler_Allocations(VALUE Memory_Profiler)
 {
 	// Allocations class - wraps allocation data for a specific class
 	Memory_Profiler_Allocations = rb_define_class_under(Memory_Profiler, "Allocations", rb_cObject);
 	
-	// Allocations objects are only created internally via wrap, never from Ruby:
-	rb_undef_alloc_func(Memory_Profiler_Allocations);
+	// Allow allocation for testing
+	rb_define_alloc_func(Memory_Profiler_Allocations, Memory_Profiler_Allocations_allocate);
 	
 	rb_define_method(Memory_Profiler_Allocations, "new_count", Memory_Profiler_Allocations_new_count, 0);
 	rb_define_method(Memory_Profiler_Allocations, "free_count", Memory_Profiler_Allocations_free_count, 0);

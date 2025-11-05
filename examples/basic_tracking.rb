@@ -37,8 +37,8 @@ end
 GC.start
 
 puts "\nLive object counts (O(1) lookups):"
-puts "  Hashes: #{capture.count_for(Hash)}"   # ~100
-puts "  Arrays: #{capture.count_for(Array)}"  # ~100
+puts "  Hashes: #{capture.retained_count_of(Hash)}"   # ~100
+puts "  Arrays: #{capture.retained_count_of(Array)}"  # ~100
 
 capture.stop
 capture.clear

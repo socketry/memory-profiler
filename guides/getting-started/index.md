@@ -45,7 +45,7 @@ end
 end
 
 # Get live object count (O(1) lookup - no heap enumeration!)
-live_count = capture.count_for(Hash)
+live_count = capture.retained_count_of(Hash)
 puts "Live Hash objects: #{live_count}"  # 1000
 
 # Stop capturing
@@ -192,9 +192,9 @@ capture.start
 # In background thread or periodic check
 loop do
 	puts "Live objects:"
-	puts "  Hashes: #{capture.count_for(Hash)}"
-	puts "  Arrays: #{capture.count_for(Array)}"
-	puts "  Strings: #{capture.count_for(String)}"
+	puts "  Hashes: #{capture.retained_count_of(Hash)}"
+	puts "  Arrays: #{capture.retained_count_of(Array)}"
+	puts "  Strings: #{capture.retained_count_of(String)}"
 	sleep 60
 end
 

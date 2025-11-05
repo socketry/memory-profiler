@@ -469,7 +469,7 @@ static VALUE Memory_Profiler_Capture_tracking_p(VALUE self, VALUE klass) {
 }
 
 // Get count of live objects for a specific class (O(1) lookup!)
-static VALUE Memory_Profiler_Capture_count_for(VALUE self, VALUE klass) {
+static VALUE Memory_Profiler_Capture_retained_count_of(VALUE self, VALUE klass) {
 	struct Memory_Profiler_Capture *capture;
 	TypedData_Get_Struct(self, struct Memory_Profiler_Capture, &Memory_Profiler_Capture_type, capture);
 	
@@ -641,7 +641,7 @@ void Init_Memory_Profiler_Capture(VALUE Memory_Profiler)
 	rb_define_method(Memory_Profiler_Capture, "track", Memory_Profiler_Capture_track, -1);  // -1 to accept block
 	rb_define_method(Memory_Profiler_Capture, "untrack", Memory_Profiler_Capture_untrack, 1);
 	rb_define_method(Memory_Profiler_Capture, "tracking?", Memory_Profiler_Capture_tracking_p, 1);
-	rb_define_method(Memory_Profiler_Capture, "count_for", Memory_Profiler_Capture_count_for, 1);
+	rb_define_method(Memory_Profiler_Capture, "retained_count_of", Memory_Profiler_Capture_retained_count_of, 1);
 	rb_define_method(Memory_Profiler_Capture, "each", Memory_Profiler_Capture_each, 0);
 	rb_define_method(Memory_Profiler_Capture, "[]", Memory_Profiler_Capture_aref, 1);
 	rb_define_method(Memory_Profiler_Capture, "clear", Memory_Profiler_Capture_clear, 0);

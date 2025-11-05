@@ -53,11 +53,11 @@ describe Memory::Profiler::Capture do
 		end
 	end
 	
-	with "#count_for" do
+	with "#retained_count_of" do
 		it "tracks allocations for a class" do
 			capture.start
 			
-			initial_count = capture.count_for(Hash)
+			initial_count = capture.retained_count_of(Hash)
 			
 			objects = 10.times.map do
 				Hash.new
@@ -65,7 +65,7 @@ describe Memory::Profiler::Capture do
 			
 			capture.stop
 			
-			new_count = capture.count_for(Hash)
+			new_count = capture.retained_count_of(Hash)
 			expect(new_count).to be >= initial_count + objects.size
 		end
 		
@@ -74,7 +74,7 @@ describe Memory::Profiler::Capture do
 			
 			capture.start
 			
-			initial_count = capture.count_for(Hash)
+			initial_count = capture.retained_count_of(Hash)
 			
 			# Allocate and retain
 			retained = []
@@ -87,7 +87,7 @@ describe Memory::Profiler::Capture do
 			GC.start
 			
 			# Check count after GC (should only have retained + initial)
-			final_count = capture.count_for(Hash)
+			final_count = capture.retained_count_of(Hash)
 			
 			# Should be close to initial + 5 (some variation due to GC internals)
 			expect(final_count).to be >= initial_count
@@ -97,7 +97,7 @@ describe Memory::Profiler::Capture do
 		end
 		
 		it "returns 0 for untracked classes" do
-			expect(capture.count_for(String)).to be == 0
+			expect(capture.retained_count_of(String)).to be == 0
 		end
 		
 		it "handles freeing objects allocated before tracking started" do
@@ -122,7 +122,7 @@ describe Memory::Profiler::Capture do
 			
 			# Count should NOT be negative - should be 0 or positive:
 			# (Objects allocated before tracking don't get negative counts when freed):
-			count = capture.count_for(Hash)
+			count = capture.retained_count_of(Hash)
 			expect(count).to be >= 0
 		ensure
 			GC.enable
@@ -193,12 +193,12 @@ describe Memory::Profiler::Capture do
 			
 			10.times{{}}
 			
-			expect(capture.count_for(Hash)).to be > 0
+			expect(capture.retained_count_of(Hash)).to be > 0
 			
 			capture.stop
 			capture.clear
 			
-			expect(capture.count_for(Hash)).to be == 0
+			expect(capture.retained_count_of(Hash)).to be == 0
 		end
 	end
 	
@@ -211,8 +211,8 @@ describe Memory::Profiler::Capture do
 			5.times{{}}
 			3.times{[]}
 			
-			hash_count = capture.count_for(Hash)
-			array_count = capture.count_for(Array)
+			hash_count = capture.retained_count_of(Hash)
+			array_count = capture.retained_count_of(Array)
 			
 			expect(hash_count).to be >= 5
 			expect(array_count).to be >= 3
@@ -240,12 +240,12 @@ describe Memory::Profiler::Capture do
 			
 			# Both captures automatically track ALL allocations
 			# The track() call is for setting up callbacks, not filtering
-			expect(capture1.count_for(Hash)).to be >= 5
-			expect(capture2.count_for(Array)).to be >= 3
+			expect(capture1.retained_count_of(Hash)).to be >= 5
+			expect(capture2.retained_count_of(Array)).to be >= 3
 			
 			# Both instances also see the other classes (automatic tracking)
-			expect(capture1.count_for(Array)).to be >= 3
-			expect(capture2.count_for(Hash)).to be >= 5
+			expect(capture1.retained_count_of(Array)).to be >= 3
+			expect(capture2.retained_count_of(Hash)).to be >= 5
 		end
 	end
 	
@@ -284,13 +284,13 @@ describe Memory::Profiler::Capture do
 			capture.start
 			5.times{{}}
 			capture.stop
-			count1 = capture.count_for(Hash)
+			count1 = capture.retained_count_of(Hash)
 			
 			# Second cycle
 			capture.start
 			3.times{{}}
 			capture.stop
-			count2 = capture.count_for(Hash)
+			count2 = capture.retained_count_of(Hash)
 			
 			# Counts should accumulate across cycles
 			expect(count2).to be >= count1 + 3
@@ -440,7 +440,7 @@ describe Memory::Profiler::Capture do
 			capture.start
 			
 			10.times{{}}
-			expect(capture.count_for(Hash)).to be > 0
+			expect(capture.retained_count_of(Hash)).to be > 0
 			
 			# Should raise an error since capture is still running
 			expect{capture.clear}.to raise_exception(RuntimeError)
@@ -449,7 +449,7 @@ describe Memory::Profiler::Capture do
 			
 			# Now clear should work
 			capture.clear
-			expect(capture.count_for(Hash)).to be == 0
+			expect(capture.retained_count_of(Hash)).to be == 0
 		end
 	end
 	
@@ -460,14 +460,14 @@ describe Memory::Profiler::Capture do
 			5.times{{}}
 			capture.stop
 			
-			count1 = capture.count_for(Hash)
+			count1 = capture.retained_count_of(Hash)
 			expect(count1).to be >= 5
 			
 			capture.untrack(Hash)
 			expect(capture.tracking?(Hash)).to be == false
 			
 			# Untracking should clear the count
-			expect(capture.count_for(Hash)).to be == 0
+			expect(capture.retained_count_of(Hash)).to be == 0
 			
 			# Re-track same class
 			capture.track(Hash)
@@ -475,7 +475,7 @@ describe Memory::Profiler::Capture do
 			3.times{{}}
 			capture.stop
 			
-			count2 = capture.count_for(Hash)
+			count2 = capture.retained_count_of(Hash)
 			# Count should be fresh after re-track
 			expect(count2).to be >= 3
 			expect(count2).to be < count1  # Should be less than first cycle
@@ -514,7 +514,7 @@ describe Memory::Profiler::Capture do
 			3.times{GC.start}
 			
 			# Should not crash with "try to mark T_NONE object"
-			expect(capture.count_for(Hash)).to be >= 0
+			expect(capture.retained_count_of(Hash)).to be >= 0
 			
 			capture.stop
 		end
@@ -588,7 +588,7 @@ describe Memory::Profiler::Capture do
 			strings = 1000.times.map{"test#{rand}"}
 			
 			# Should not crash
-			expect(capture.count_for(String)).to be >= 1000
+			expect(capture.retained_count_of(String)).to be >= 1000
 			
 			capture.stop
 			
@@ -702,7 +702,7 @@ describe Memory::Profiler::Capture do
 			capture.stop
 			
 			# Should not have crashed
-			expect(capture.count_for(Array)).to be >= 0
+			expect(capture.retained_count_of(Array)).to be >= 0
 		end
 	end
 end

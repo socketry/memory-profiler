@@ -187,7 +187,7 @@ module Memory
 			# @parameter limit [Integer] Maximum number of paths to return.
 			# @parameter by [Symbol] Sort by :total or :retained count.
 			# @returns [Array(Array)] Array of [locations, total_count, retained_count].
-			def top_paths(limit = 10, by: :retained)
+			def top_paths(limit: 10, by: :retained)
 				paths = []
 				
 				@root.each_path do |path, total_count, retained_count|
@@ -206,7 +206,7 @@ module Memory
 			# @parameter limit [Integer] Maximum number of hotspots to return.
 			# @parameter by [Symbol] Sort by :total or :retained count.
 			# @returns [Hash] Map of location => [total_count, retained_count].
-			def hotspots(limit = 20, by: :retained)
+			def hotspots(limit: 20, by: :retained)
 				frames = Hash.new{|h, k| h[k] = [0, 0]}
 				
 				collect_frames(@root, frames)
@@ -243,6 +243,29 @@ module Memory
 			# @returns [Integer] Total number of nodes pruned (discarded).
 			def prune!(limit = 5)
 				@root.prune!(limit)
+			end
+			
+			# Convert call tree data to JSON-compatible hash.
+			#
+			# @returns [Hash] Call tree data as a hash.
+			def as_json(top_paths: {limit: 10}, hotspots: {limit: 20})
+				{
+					total_allocations: total_allocations,
+						retained_allocations: retained_allocations,
+						top_paths: top_paths(**top_paths).map{|path, total, retained| 
+							{path: path, total_count: total, retained_count: retained}
+						},
+						hotspots: hotspots(**hotspots).transform_values{|total, retained|
+							{total_count: total, retained_count: retained}
+						}
+				}
+			end
+			
+			# Convert call tree data to JSON string.
+			#
+			# @returns [String] Call tree data as JSON.
+			def to_json(...)
+				as_json.to_json(...)
 			end
 			
 		private
