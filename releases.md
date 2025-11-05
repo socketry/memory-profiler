@@ -4,6 +4,7 @@
 
   - Enable custom `depth:` and `filter:` options to `Sampler#track`.
   - Change default filter to no-op.
+  - Add option to run GC with custom options before each sample to reduce noise.
 
 ## v1.1.15
 

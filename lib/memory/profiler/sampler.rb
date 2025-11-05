@@ -93,12 +93,15 @@ module Memory
 			# @parameter increases_threshold [Integer] Number of increases before enabling detailed tracking.
 			# @parameter prune_limit [Integer] Keep only top N children per node during pruning (default: 5).
 			# @parameter prune_threshold [Integer] Number of insertions before auto-pruning (nil = no auto-pruning).
-			def initialize(depth: 4, filter: nil, increases_threshold: 10, prune_limit: 5, prune_threshold: nil)
+			# @parameter gc [Hash | Nil] Run GC with these options before each sample (nil = don't run GC).
+			def initialize(depth: 4, filter: nil, increases_threshold: 10, prune_limit: 5, prune_threshold: nil, gc: nil)
 				@depth = depth
 				@filter = filter || default_filter
 				@increases_threshold = increases_threshold
 				@prune_limit = prune_limit
 				@prune_threshold = prune_threshold
+				@gc = gc
+				
 				@capture = Capture.new
 				@call_trees = {}
 				@samples = {}
@@ -149,6 +152,9 @@ module Memory
 			def run(interval: 60, &block)
 				while true
 					start_time = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+					
+					# Optional garbage collection before sampling can help reduce noise:
+					GC.start(**@gc) if @gc
 					
 					sample!(&block)
 					
