@@ -22,6 +22,11 @@ Please see the [project documentation](https://socketry.github.io/memory-profile
 
 Please see the [project releases](https://socketry.github.io/memory-profiler/releases/index) for all releases.
 
+### v1.1.13
+
+  - Fix sampler loop interval handling.
+  - Log capture statistics from sampler run loop.
+
 ### v1.1.12
 
   - Use `rb_obj_id` for tracking object states to avoid compaction issues.
@@ -64,10 +69,6 @@ Please see the [project releases](https://socketry.github.io/memory-profiler/rel
 ### v1.1.2
 
   - Fix handling of GC compaction (I hope).
-
-### v0.1.0
-
-  - Initial implementation.
 
 ## Contributing
 
