@@ -175,15 +175,22 @@ module Memory
 				@capture.each do |klass, allocations|
 					count = allocations.retained_count
 					sample = @samples[klass] ||= Sample.new(klass, count)
+					increased = false
 					
 					if sample.sample!(count)
-						# Check if we should enable detailed tracking
-						if sample.increases >= @increases_threshold && !@call_trees.key?(klass)
-							track(klass, allocations)
-						end
+						increased = true
 						
-						# Notify about growth if block given
-						yield sample if block_given?
+						# Check if we should enable detailed tracking
+						if sample.increases >= @increases_threshold
+							# Start tracking with call path analysis if not already doing so:
+							unless tracking?(klass)
+								track(klass, allocations)
+							end
+						end
+					end
+					
+					if block_given?
+						yield sample, increased
 					end
 				end
 				
