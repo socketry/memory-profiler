@@ -1,6 +1,6 @@
 # Releases
 
-## Unreleased
+## v1.2.0
 
   - Enable custom `depth:` and `filter:` options to `Sampler#track`.
   - Change default filter to no-op.

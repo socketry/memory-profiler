@@ -22,6 +22,13 @@ Please see the [project documentation](https://socketry.github.io/memory-profile
 
 Please see the [project releases](https://socketry.github.io/memory-profiler/releases/index) for all releases.
 
+### v1.2.0
+
+  - Enable custom `depth:` and `filter:` options to `Sampler#track`.
+  - Change default filter to no-op.
+  - Add option to run GC with custom options before each sample to reduce noise.
+  - Always report sampler statistics after each sample.
+
 ### v1.1.15
 
   - Ignore `freeobj` for classes that are not being tracked.
@@ -63,12 +70,6 @@ Please see the [project releases](https://socketry.github.io/memory-profiler/rel
 ### v1.1.7
 
   - Expose `Capture#statistics` for debugging internal memory tracking state.
-
-### v1.1.6
-
-  - Write barriers all the things.
-  - Better state handling and object increment/decrement counting.
-  - Better call tree handling - including support for `prune!`.
 
 ## Contributing
 
