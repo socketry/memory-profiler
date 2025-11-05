@@ -1,6 +1,6 @@
 # Releases
 
-## Unreleased
+## v1.3.0
 
   - **Breaking**: Renamed `Capture#count_for` to `Capture#retained_count_of` for better clarity and consistency.
   - **Breaking**: Changed `CallTree#top_paths(limit)` to `CallTree#top_paths(limit:)` - now uses keyword argument.

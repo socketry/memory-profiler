@@ -22,6 +22,18 @@ Please see the [project documentation](https://socketry.github.io/memory-profile
 
 Please see the [project releases](https://socketry.github.io/memory-profiler/releases/index) for all releases.
 
+### v1.3.0
+
+  - **Breaking**: Renamed `Capture#count_for` to `Capture#retained_count_of` for better clarity and consistency.
+  - **Breaking**: Changed `CallTree#top_paths(limit)` to `CallTree#top_paths(limit:)` - now uses keyword argument.
+  - **Breaking**: Changed `CallTree#hotspots(limit)` to `CallTree#hotspots(limit:)` - now uses keyword argument.
+  - Simplified `Sampler#analyze` return structure to `{allocations: {...}, call_tree: {...}}` format.
+  - Added `Allocations#as_json` and `Allocations#to_json` methods for JSON serialization.
+  - Added `CallTree#as_json` and `CallTree#to_json` methods for JSON serialization with configurable options.
+  - `Memory::Profiler::Allocations.new` can now be instantiated directly (primarily for testing).
+  - `Sampler#statistics` is now a deprecated alias for `Sampler#analyze`.
+  - **Breaking**: Removed `Sampler#all_statistics` method.
+
 ### v1.2.0
 
   - Enable custom `depth:` and `filter:` options to `Sampler#track`.
@@ -66,10 +78,6 @@ Please see the [project releases](https://socketry.github.io/memory-profiler/rel
 ### v1.1.8
 
   - Use single global queue for event handling to avoid incorrect ordering.
-
-### v1.1.7
-
-  - Expose `Capture#statistics` for debugging internal memory tracking state.
 
 ## Contributing
 
