@@ -16,12 +16,17 @@ if ENV.key?("RUBY_DEBUG")
 	append_cflags(["-DRUBY_DEBUG", "-O0"])
 end
 
-$srcs = ["memory/profiler/profiler.c", "memory/profiler/capture.c", "memory/profiler/allocations.c", "memory/profiler/events.c"]
+$srcs = ["memory/profiler/profiler.c", "memory/profiler/capture.c", "memory/profiler/allocations.c", "memory/profiler/events.c", "memory/profiler/graph.c"]
 $VPATH << "$(srcdir)/memory/profiler"
 
 # Check for required headers
 have_header("ruby/debug.h") or abort "ruby/debug.h is required"
 have_func("rb_ext_ractor_safe")
+
+# Check for internal ObjectSpace functions (for efficient graph traversal)
+# These are internal Ruby functions, so they may not be available in all Ruby versions
+have_func("rb_objspace_reachable_objects_from", ["ruby.h", "ruby/debug.h"])
+have_func("rb_objspace_reachable_objects_from_root", ["ruby.h", "ruby/debug.h"])
 
 if ENV.key?("RUBY_SANITIZE")
 	$stderr.puts "Enabling sanitizers..."

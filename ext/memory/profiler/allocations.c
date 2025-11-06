@@ -9,6 +9,7 @@
 #include <stdio.h>
 
 static VALUE Memory_Profiler_Allocations = Qnil;
+static VALUE rb_mObjectSpace = Qnil;
 
 // Helper to mark states table (object => state)
 static int Memory_Profiler_Allocations_states_mark(st_data_t key, st_data_t value, st_data_t arg) {
@@ -115,6 +116,41 @@ static VALUE Memory_Profiler_Allocations_retained_count(VALUE self) {
 	return SIZET2NUM(retained);
 }
 
+// Iterator callback for each - yields object (converted from object_id) and state
+static int Memory_Profiler_Allocations_each_callback(st_data_t key, st_data_t value, st_data_t arg) {
+	VALUE object_id = (VALUE)key;  // Integer object_id
+	VALUE state = (VALUE)value;
+	
+	// Convert object_id back to actual object using rb_check_funcall.
+	// This returns Qundef if the object was freed (RangeError would be raised).
+	VALUE object = rb_check_funcall(rb_mObjectSpace, rb_intern("_id2ref"), 1, &object_id);
+	
+	if (object == Qundef) {
+		// Object was freed, skip it
+		return ST_CONTINUE;
+	}
+	
+	// Yield the object and its state
+	rb_yield_values(2, object, state);
+	
+	return ST_CONTINUE;
+}
+
+// Allocations#each { |object, state| ... }
+// Iterates over all tracked objects, converting object_ids back to actual objects.
+// Objects that have been freed are silently skipped.
+static VALUE Memory_Profiler_Allocations_each(VALUE self) {
+	struct Memory_Profiler_Capture_Allocations *record = Memory_Profiler_Allocations_get(self);
+	
+	RETURN_ENUMERATOR(self, 0, 0);
+	
+	if (record->states) {
+		st_foreach(record->states, Memory_Profiler_Allocations_each_callback, 0);
+	}
+	
+	return self;
+}
+
 // Allocations#track { |klass| ... }
 static VALUE Memory_Profiler_Allocations_track(int argc, VALUE *argv, VALUE self) {
 	struct Memory_Profiler_Capture_Allocations *record = Memory_Profiler_Allocations_get(self);
@@ -156,6 +192,10 @@ static VALUE Memory_Profiler_Allocations_allocate(VALUE klass) {
 
 void Init_Memory_Profiler_Allocations(VALUE Memory_Profiler)
 {
+	// Cache ObjectSpace module for _id2ref calls
+	rb_mObjectSpace = rb_const_get(rb_cObject, rb_intern("ObjectSpace"));
+	rb_gc_register_mark_object(rb_mObjectSpace);
+	
 	// Allocations class - wraps allocation data for a specific class
 	Memory_Profiler_Allocations = rb_define_class_under(Memory_Profiler, "Allocations", rb_cObject);
 	
@@ -166,4 +206,5 @@ void Init_Memory_Profiler_Allocations(VALUE Memory_Profiler)
 	rb_define_method(Memory_Profiler_Allocations, "free_count", Memory_Profiler_Allocations_free_count, 0);
 	rb_define_method(Memory_Profiler_Allocations, "retained_count", Memory_Profiler_Allocations_retained_count, 0);
 	rb_define_method(Memory_Profiler_Allocations, "track", Memory_Profiler_Allocations_track, -1);  // -1 to accept block
+	rb_define_method(Memory_Profiler_Allocations, "each", Memory_Profiler_Allocations_each, 0);
 }

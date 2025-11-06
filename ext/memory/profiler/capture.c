@@ -138,7 +138,8 @@ const char *event_flag_name(rb_event_flag_t event_flag) {
 }
 
 // Process a NEWOBJ event. All allocation tracking logic is here.
-static void Memory_Profiler_Capture_process_newobj(VALUE self, VALUE klass, VALUE object) {
+// object_id parameter is the Integer object_id, NOT the raw object.
+static void Memory_Profiler_Capture_process_newobj(VALUE self, VALUE klass, VALUE object_id) {
 	struct Memory_Profiler_Capture *capture;
 	TypedData_Get_Struct(self, struct Memory_Profiler_Capture, &Memory_Profiler_Capture_type, capture);
 	
@@ -176,11 +177,11 @@ static void Memory_Profiler_Capture_process_newobj(VALUE self, VALUE klass, VALU
 	if (!NIL_P(record->callback)) {
 		VALUE state = rb_funcall(record->callback, rb_intern("call"), 3, klass, sym_newobj, Qnil);
 		
-		// Store state using object as key (works because object is alive):
-		st_insert(record->states, (st_data_t)object, (st_data_t)state);
+		// Store state using object_id as key (Integer, doesn't move during GC):
+		st_insert(record->states, (st_data_t)object_id, (st_data_t)state);
 	} else {
 		// Store state as nil:
-		st_insert(record->states, (st_data_t)object, (st_data_t)Qnil);
+		st_insert(record->states, (st_data_t)object_id, (st_data_t)Qnil);
 	}
 
 	// Resume the capture:
@@ -188,7 +189,8 @@ static void Memory_Profiler_Capture_process_newobj(VALUE self, VALUE klass, VALU
 }
 
 // Process a FREEOBJ event. All deallocation tracking logic is here.
-static void Memory_Profiler_Capture_process_freeobj(VALUE capture_value, VALUE klass, VALUE object) {
+// object_id parameter is the Integer object_id, NOT the raw object.
+static void Memory_Profiler_Capture_process_freeobj(VALUE capture_value, VALUE klass, VALUE object_id) {
 	struct Memory_Profiler_Capture *capture;
 	TypedData_Get_Struct(capture_value, struct Memory_Profiler_Capture, &Memory_Profiler_Capture_type, capture);
 	
@@ -211,7 +213,7 @@ static void Memory_Profiler_Capture_process_freeobj(VALUE capture_value, VALUE k
 	}
 	
 	st_data_t state_data;
-	if (st_delete(record->states, (st_data_t *)&object, &state_data)) {
+	if (st_delete(record->states, (st_data_t *)&object_id, &state_data)) {
 		VALUE state = (VALUE)state_data;
 		
 		// Increment global free count
@@ -310,11 +312,11 @@ static void Memory_Profiler_Capture_event_callback(VALUE data, void *ptr) {
 		// Skip NEWOBJ if disabled (during callback) to prevent infinite recursion
 		if (capture->paused) return;
 		
-		// Check if class is already freed (T_NONE). This can happen when:
-		// It's safe to unconditionally call here:
-		object = rb_obj_id(object);
+		// Convert to object_id for storage (Integer VALUE).
+		// It's safe to unconditionally call rb_obj_id during NEWOBJ.
+		VALUE object_id = rb_obj_id(object);
 
-		Memory_Profiler_Events_enqueue(MEMORY_PROFILER_EVENT_TYPE_NEWOBJ, data, klass, object);
+		Memory_Profiler_Events_enqueue(MEMORY_PROFILER_EVENT_TYPE_NEWOBJ, data, klass, object_id);
 	} else if (event_flag == RUBY_INTERNAL_EVENT_FREEOBJ) {
 		// We only care about objects that have been seen before (i.e. have an object ID):
 		if (RB_FL_TEST(object, FL_SEEN_OBJ_ID)) {
@@ -322,10 +324,11 @@ static void Memory_Profiler_Capture_event_callback(VALUE data, void *ptr) {
 			// This prevents us from enqueuing klass objects that might be freed.
 			if (!st_lookup(capture->tracked_classes, (st_data_t)klass, NULL)) return;
 			
-			// It's only safe to call here if the object already has an object ID.
-			object = rb_obj_id(object);
+			// Convert to object_id for storage (Integer VALUE).
+			// It's only safe to call rb_obj_id if the object already has an object ID.
+			VALUE object_id = rb_obj_id(object);
 			
-			Memory_Profiler_Events_enqueue(MEMORY_PROFILER_EVENT_TYPE_FREEOBJ, data, klass, object);
+			Memory_Profiler_Events_enqueue(MEMORY_PROFILER_EVENT_TYPE_FREEOBJ, data, klass, object_id);
 		}
 	}
 }

@@ -17,8 +17,9 @@ struct Memory_Profiler_Capture_Allocations {
 	size_t free_count;
 	// Live count = new_count - free_count.
 	
-	// Map object (VALUE) => state (VALUE).
-	// Object keys need compaction updates when they move.
+	// Map object_id (Integer VALUE) => state (VALUE).
+	// Keys are object IDs (Integers), not raw objects - they don't move during GC.
+	// Values (states) are movable and need compaction updates.
 	st_table *states;
 };
 

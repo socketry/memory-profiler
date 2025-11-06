@@ -2,6 +2,7 @@
 // Copyright, 2025, by Samuel Williams.
 
 #include "capture.h"
+#include "graph.h"
 
 void Init_Memory_Profiler(void)
 {
@@ -13,5 +14,6 @@ void Init_Memory_Profiler(void)
     VALUE Memory_Profiler = rb_define_module_under(Memory, "Profiler");
     
     Init_Memory_Profiler_Capture(Memory_Profiler);
+    Init_Memory_Profiler_Graph(Memory_Profiler);
 }
 
