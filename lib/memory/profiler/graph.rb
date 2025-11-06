@@ -12,7 +12,7 @@ module Memory
 			def initialize
 				@objects = Set.new.compare_by_identity
 				@parents = Hash.new{|hash, key| hash[key] = Set.new.compare_by_identity}.compare_by_identity
-				@names = Hash.new.compare_by_identity
+				@internals = Set.new
 				@root = nil # Track the root of traversal for idom
 			end
 			
@@ -33,45 +33,32 @@ module Memory
 			def update!(from = Object)
 				# Store the root for idom algorithm
 				@root = from
-				
+				@parents.clear
+				@internals.clear
+
 				# If the user has provided a specific object, try to avoid traversing the root Object.
 				if from != Object
-					@parents.clear
-					@names.clear
 					@parents[Object] = nil
 				end
-
+				
 				# Don't traverse the graph itself:
 				@parents[self] = nil
 				
-				Console.info(self, "Traversing from #{from.inspect}")
 				traverse!(from)
-				Console.info(self, "Traversal complete")
 			end
 			
-			def name_for(object, seen = Set.new.compare_by_identity)
-				return "" if seen.include?(object)
-				seen.add(object)
-				
+			def name_for(object, limit = 8)
 				if object.is_a?(Module)
-					# Name could be nil if it is anonymous.
 					object.name.to_s
 				elsif object.is_a?(Object)
-					parents = @parents[object]
-					
-					if parents&.any?
-						names = parents.map do |parent|
-							compute_edge_label(parent, object)
+					if limit > 0
+						parents = @parents[object]
+						if parent = parents&.first
+							return name_for(parent, limit - 1) + compute_edge_label(parent, object)
 						end
-						
-						if names.size > 1
-							return "[#{names.join("|")}]"
-						else
-							names.first
-						end
-					else
-						object.class.name.to_s
 					end
+					
+					return object.class.name.to_s
 				else
 					object.inspect
 				end
@@ -109,8 +96,8 @@ module Memory
 				dominated_counts.each do |object, count|
 					result = {
 						name: name_for(object),
-						count: count,
-						percentage: (count * 100.0) / total
+							count: count,
+							percentage: (count * 100.0) / total
 					}
 					
 					if retained_count = retained_by_counts[object]
@@ -139,6 +126,10 @@ module Memory
 			end
 			
 		private
+
+			IS_A = Kernel.method(:is_a?).unbind
+			RESPOND_TO = Kernel.method(:respond_to?).unbind
+			EQUAL = Kernel.method(:equal?).unbind
 			
 			def traverse!(object, parent = nil)
 				queue = Array.new
@@ -146,12 +137,27 @@ module Memory
 				
 				while queue.any?
 					object, parent = queue.shift
-					extract_names!(object)
 					
-					reachable_objects_from(object) do |child|
-						next unless parents = @parents[child]
-						if parents.add?(object)
-							queue << [child, object]
+					# We shouldn't use internal objects as parents.
+					unless IS_A.bind_call(object, ObjectSpace::InternalObjectWrapper)
+						parent = object
+					end
+					
+					ObjectSpace.reachable_objects_from(object).each do |child|
+						if IS_A.bind_call(child, ObjectSpace::InternalObjectWrapper)
+							# There is no value in scanning internal objects.
+							next if child.type == :T_IMEMO
+
+							# We need to handle internal objects differently, because they don't follow the same equality/identity rules. Since we can reach the same internal object from multiple parents, we need to use an appropriate key to track it. Otherwise, the objects will not be counted on subsequent parent traversals.
+							key = [parent.object_id, child.internal_object_id]
+							if @internals.add?(key)
+								queue << [child, parent]
+							end
+						elsif parents = @parents[child] # Skip traversal if we are explicitly set to nil.
+							# If we haven't seen the object yet, add it to the queue:
+							if parents.add?(parent)
+								queue << [child, parent]
+							end
 						end
 					end
 				end
@@ -167,24 +173,22 @@ module Memory
 				when Hash
 					if parent.size < SEARCH_LIMIT
 						# Use Ruby's built-in key method to find the key
-						key = parent.key(object)
-						return key ? "[#{key.inspect}]" : object.class.name
-					else
-						return "[#{parent.size} keys]"
+						if key = parent.key(object)
+							return "[#{key.inspect}]"
+						end
 					end
+					return "[?/#{parent.size}]"
 				when Array
 					if parent.size < SEARCH_LIMIT
 						# Use Ruby's built-in index method to find the position
-						index = parent.index(object)
-						return index ? "[#{index}]" : object.class.name
-					else
-						return "[#{parent.size} elements]"
+						if index = parent.index(object)
+							return "[#{index}]"
+						end
 					end
-				when Object
-					return @names[object]&.to_s || object.class.name
+					return "[?/#{parent.size}]"
 				else
-					return "(unknown)"
-				end.to_s
+					return extract_name(parent, object)
+				end
 			rescue => error
 				# If inspection fails, fall back to class name
 				return "(#{error.class.name}: #{error.message})"
@@ -304,24 +308,61 @@ module Memory
 				depth
 			end
 			
-			IS_A = Kernel.method(:is_a?).unbind
-			
-			def extract_names!(from)
-				if IS_A.bind_call(from, Module)
-					from.constants.each do |constant|
-						if !from.autoload?(constant) && from.const_defined?(constant)
-							if key = from.const_get(constant) and IS_A.bind_call(key, BasicObject)
-								@names[key] = "::#{constant}"
+			def extract_name(parent, object)
+				if RESPOND_TO.bind_call(parent, :constants)
+					parent.constants.each do |constant|
+						if !parent.autoload?(constant) && parent.const_defined?(constant)
+							if EQUAL.bind_call(parent.const_get(constant), object)
+								return "::#{constant}"
 							end
 						end
 					end
-				elsif IS_A.bind_call(from, Object)
-					from.instance_variables.each do |variable|
-						if key = from.instance_variable_get(variable) and IS_A.bind_call(key, BasicObject)
-							@names[key] = ".#{variable}"
+				end
+				
+				if RESPOND_TO.bind_call(parent, :instance_variables)
+					parent.instance_variables.each do |variable|
+						if EQUAL.bind_call(parent.instance_variable_get(variable), object)
+							return ".#{variable}"
 						end
 					end
 				end
+				
+				if IS_A.bind_call(parent, Struct)
+					parent.members.each do |member|
+						if EQUAL.bind_call(parent[member], object)
+							return ".#{member}"
+						end
+					end
+				end
+				
+				if IS_A.bind_call(parent, Fiber)
+					return "(fiber)"
+				end
+				
+				if IS_A.bind_call(parent, Thread)
+					parent.thread_variables.each do |variable|
+						if EQUAL.bind_call(parent.thread_variable_get(variable), object)
+							return "(TLS #{variable})"
+						end
+					end
+					
+					parent.keys.each do |key|
+						if EQUAL.bind_call(parent[key], object)
+							return "[#{key}]"
+						end
+					end
+					
+					return "(thread)"
+				end
+				
+				if IS_A.bind_call(parent, Ractor)
+					return "(ractor)"
+				end
+				
+				return "(#{parent.inspect}::???)"
+			rescue => error
+				# If inspection fails, fall back to class name
+				return "(#{error.class.name}: #{error.message})"
 			end
 		end
 	end

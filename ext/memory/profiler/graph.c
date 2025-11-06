@@ -18,13 +18,9 @@ extern void rb_objspace_reachable_objects_from(VALUE object, void (*func)(VALUE,
 extern int rb_objspace_internal_object_p(VALUE object);
 extern int rb_objspace_garbage_object_p(VALUE object);
 
-static void Memory_Profiler_Graph_reachable_objects_from_callback(VALUE object, void *data) {	
+static void Memory_Profiler_Graph_reachable_objects_from_callback(VALUE object, void *data) {
 	// Skip garbage objects and internal objects:
 	if (rb_objspace_garbage_object_p(object)) {
-		return;
-	}
-	
-	if (rb_objspace_internal_object_p(object)) {
 		return;
 	}
 	
@@ -50,10 +46,11 @@ static void Memory_Profiler_Graph_reachable_objects_from(VALUE self, VALUE objec
 
 		// Skip internal objects:
 		if (rb_obj_is_kind_of(child, rb_cInternalObjectWrapper)) {
-			continue;
+			// We don't want internal objects to appear as parents, so we recurse internally:
+			Memory_Profiler_Graph_reachable_objects_from(self, child);
+		} else {
+			rb_yield_values(1, child);
 		}
-		
-		rb_yield_values(1, child);
 	}
 
 	return Qnil;
