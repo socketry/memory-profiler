@@ -96,33 +96,33 @@ describe Memory::Profiler::Graph do
 			# With circular references and multi-parent tracking,
 			# each object in the cycle has multiple parents
 			# The dominator should still account for all 10 objects
-			total = roots.sum { |r| r[:count] }
+			total = roots.sum{|r| r[:count]}
 			expect(total).to be == 10
 		end
 	end
 	
 	with "nested structures" do
-	it "handles deeply nested arrays" do
-		root = []
-		current = root
-		
-		10.times do
-			inner = []
-			current << inner
-			graph.add(inner)
-			current = inner
+		it "handles deeply nested arrays" do
+			root = []
+			current = root
+			
+			10.times do
+				inner = []
+				current << inner
+				graph.add(inner)
+				current = inner
+			end
+			
+			graph.update!(root)
+			roots = graph.roots
+			
+			# With idom, each array dominates only its immediate child
+			# So we get 10 different dominators, each dominating 1 object
+			expect(roots.size).to be == 10
+			roots.each do |root_info|
+				expect(root_info[:count]).to be == 1
+			end
 		end
-		
-		graph.update!(root)
-		roots = graph.roots
-		
-		# With idom, each array dominates only its immediate child
-		# So we get 10 different dominators, each dominating 1 object
-		expect(roots.size).to be == 10
-		roots.each do |root_info|
-			expect(root_info[:count]).to be == 1
-		end
-	end
 		
 		it "handles hash with many keys" do
 			root = {}
@@ -139,30 +139,30 @@ describe Memory::Profiler::Graph do
 			expect(roots.first[:count]).to be == 100
 		end
 		
-	it "handles mixed hash and array structures" do
-		root = {arrays: [], hashes: {}}
-		
-		50.times do |i|
-			arr = [i]
-			root[:arrays] << arr
-			graph.add(arr)
+		it "handles mixed hash and array structures" do
+			root = {arrays: [], hashes: {}}
+			
+			50.times do |i|
+				arr = [i]
+				root[:arrays] << arr
+				graph.add(arr)
+			end
+			
+			50.times do |i|
+				h = {value: i}
+				root[:hashes]["key_#{i}"] = h
+				graph.add(h)
+			end
+			
+			graph.update!(root)
+			roots = graph.roots
+			
+			# With idom, each immediate container gets its own objects
+			# The arrays array dominates 50, the hashes hash dominates 50
+			expect(roots.size).to be >= 2
+			total_dominated = roots.sum{|r| r[:count]}
+			expect(total_dominated).to be == 100
 		end
-		
-		50.times do |i|
-			h = {value: i}
-			root[:hashes]["key_#{i}"] = h
-			graph.add(h)
-		end
-		
-		graph.update!(root)
-		roots = graph.roots
-		
-		# With idom, each immediate container gets its own objects
-		# The arrays array dominates 50, the hashes hash dominates 50
-		expect(roots.size).to be >= 2
-		total_dominated = roots.sum { |r| r[:count] }
-		expect(total_dominated).to be == 100
-	end
 	end
 	
 	with "multiple roots" do
@@ -228,17 +228,17 @@ describe Memory::Profiler::Graph do
 			expect(roots).to be == []
 		end
 		
-	it "handles object with no parents" do
-		orphan = {orphan: true}
-		graph.add(orphan)
-		
-		graph.update!(orphan)
-		roots = graph.roots
-		
-		# With idom, orphan is the root and dominates itself
-		expect(roots.size).to be == 1
-		expect(roots.first[:count]).to be == 1
-	end
+		it "handles object with no parents" do
+			orphan = {orphan: true}
+			graph.add(orphan)
+			
+			graph.update!(orphan)
+			roots = graph.roots
+			
+			# With idom, orphan is the root and dominates itself
+			expect(roots.size).to be == 1
+			expect(roots.first[:count]).to be == 1
+		end
 		
 		it "handles very large object counts" do
 			root = LeakyObject.new

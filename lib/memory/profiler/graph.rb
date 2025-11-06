@@ -42,38 +42,38 @@ module Memory
 				traverse!(from)
 			end
 			
-		# Find retaining roots using immediate dominator algorithm
-		# Returns array of hashes with :name, :count, :percentage
-		# C implementation in ext/memory/profiler/graph.c
-		# def roots
-		# 	roots_with_idom
-		# end
+			# Find retaining roots using immediate dominator algorithm
+			# Returns array of hashes with :name, :count, :percentage
+			# C implementation in ext/memory/profiler/graph.c
+			# def roots
+			# 	roots_with_idom
+			# end
 			
-		def name_for(object, seen = Set.new.compare_by_identity)
-			return "" if seen.include?(object)
-			seen.add(object)
-			
-			if object.is_a?(Module)
-				object.name
-			elsif object.is_a?(Object)
-				parents = @parents[object]
-
-				if parents&.any?
-					parents.map do |parent|
-						name_for(parent, seen) + compute_edge_label(parent, object)
-					end.join(" | ")
+			def name_for(object, seen = Set.new.compare_by_identity)
+				return "" if seen.include?(object)
+				seen.add(object)
+				
+				if object.is_a?(Module)
+					object.name
+				elsif object.is_a?(Object)
+					parents = @parents[object]
+					
+					if parents&.any?
+						parents.map do |parent|
+							name_for(parent, seen) + compute_edge_label(parent, object)
+						end.join(" | ")
+					else
+						object.class.name
+					end
 				else
-					object.class.name
+					object.inspect
 				end
-			else
-				object.inspect
 			end
-		end
 			
 		private
 			# Limit the cost of computing the edge label.
 			SEARCH_LIMIT = 1000
-
+			
 			# Lazily compute the edge label (how parent references child)
 			# This is called on-demand for objects that appear in roots
 			def compute_edge_label(parent, object)
@@ -104,18 +104,22 @@ module Memory
 				return "(#{error.class.name}: #{error.message})"
 			end
 			
+			IS_A = Kernel.method(:is_a?).unbind
+			
 			def extract_names!(from)
 				if from.is_a?(Module)
 					from.constants.each do |constant|
 						if !from.autoload?(constant) && from.const_defined?(constant)
-							key = from.const_get(constant)
-							@names[key] = "::#{constant}" if key&.is_a?(Object)
+							if key = from.const_get(constant) and IS_A.bind_call(key, BasicObject)
+								@names[key] = "::#{constant}"
+							end
 						end
 					end
 				elsif from.is_a?(Object)
 					from.instance_variables.each do |variable|
-						key = from.instance_variable_get(variable)
-						@names[key] = variable if key&.is_a?(Object)
+						if key = from.instance_variable_get(variable) and IS_A.bind_call(key, BasicObject)
+							@names[key] = variable
+						end
 					end
 				end
 			end

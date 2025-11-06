@@ -254,55 +254,55 @@ module Memory
 				@call_trees[klass]
 			end
 			
-		# Get allocation statistics for a tracked class.
-		#
-		# @parameter klass [Class] The class to get statistics for.
-		# @parameter allocation_roots [Boolean] Include call tree showing where allocations occurred (default: true if available).
-		# @parameter retained_roots [Boolean] Compute object graph showing what's retaining allocations (default: true, can be slow for large graphs).
-		# @parameter roots_from [Object] Starting point for retained roots analysis (default: Object).
-		# @returns [Hash] Statistics including allocations, allocation_roots (call tree), and retained_roots (object graph).
-		def analyze(klass, allocation_roots: true, retained_roots: true, roots_from: Object)
-			call_tree_data = @call_trees[klass] if allocation_roots
-			allocations = @capture[klass]
-			
-			return nil unless call_tree_data or allocations
-			
-			result = {
-				allocations: allocations&.as_json,
-			}
-			
-			if allocation_roots && call_tree_data
-				result[:allocation_roots] = call_tree_data.as_json
+			# Get allocation statistics for a tracked class.
+			#
+			# @parameter klass [Class] The class to get statistics for.
+			# @parameter allocation_roots [Boolean] Include call tree showing where allocations occurred (default: true if available).
+			# @parameter retained_roots [Boolean] Compute object graph showing what's retaining allocations (default: true, can be slow for large graphs).
+			# @parameter roots_from [Object] Starting point for retained roots analysis (default: Object).
+			# @returns [Hash] Statistics including allocations, allocation_roots (call tree), and retained_roots (object graph).
+			def analyze(klass, allocation_roots: true, retained_roots: true)
+				call_tree_data = @call_trees[klass] if allocation_roots
+				allocations = @capture[klass]
+				
+				return nil unless call_tree_data or allocations
+				
+				result = {
+					allocations: allocations&.as_json,
+				}
+				
+				if allocation_roots && call_tree_data
+					result[:allocation_roots] = call_tree_data.as_json
+				end
+				
+				if retained_roots && allocations
+					result[:retained_roots] = compute_roots(allocations)
+				end
+				
+				result
 			end
 			
-			if retained_roots && allocations
-				result[:retained_roots] = compute_roots(allocations, roots_from)
-			end
-			
-			result
-		end
-		
 		private
-		
-		# Compute retaining roots for a class's allocations
-		def compute_roots(allocations, from)
-			graph = Graph.new
 			
-			# Add all tracked objects to the graph
-			allocations.each do |object, state|
-				graph.add(object)
+			# Compute retaining roots for a class's allocations
+			def compute_roots(allocations)
+				graph = Graph.new
+				
+				# Add all tracked objects to the graph
+				allocations.each do |object, state|
+					graph.add(object)
+				end
+				
+				# Build parent relationships
+				graph.update!
+				
+				# Return roots analysis
+				graph.roots
 			end
 			
-			# Build parent relationships
-			graph.update!(from)
-			
-			# Return roots analysis
-			graph.roots
-		end
-		
 		public
-		
-		# Clear tracking data for a class.
+			
+			# Clear tracking data for a class.
 			def clear(klass)
 				tree = @call_trees[klass]
 				tree&.clear!
