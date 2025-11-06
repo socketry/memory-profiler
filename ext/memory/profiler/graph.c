@@ -212,7 +212,7 @@ static VALUE Memory_Profiler_Graph_intersect(VALUE node1, VALUE node2, VALUE par
 	st_table *seen = st_init_numtable();
 	
 	int iterations = 0;
-	while (!rb_equal(finger1, finger2)) {
+	while (finger1 != finger2) {  // Identity comparison
 		if (++iterations > 10000) break; // Safety
 		
 		// Prevent infinite loops
@@ -281,7 +281,7 @@ static VALUE Memory_Profiler_Graph_compute_idom(VALUE self) {
 		
 		// Node is a root if it has no parents or empty parent list
 		if (NIL_P(parent_list) || RARRAY_LEN(parent_list) == 0) {
-			if (!rb_equal(node, root_node)) {
+			if (node != root_node) {  // Identity comparison
 				rb_ary_push(roots, node);
 				// Roots dominate themselves
 				rb_hash_aset(idom_hash, node, node);
@@ -325,7 +325,7 @@ static VALUE Memory_Profiler_Graph_compute_idom(VALUE self) {
 			// Intersect with other processed predecessors
 			for (long j = 0; j < preds_len; j++) {
 				VALUE pred = rb_ary_entry(preds, j);
-				if (rb_equal(pred, new_idom)) continue;
+				if (pred == new_idom) continue;  // Identity comparison
 				
 				VALUE pred_idom = rb_hash_aref(idom_hash, pred);
 				if (NIL_P(pred_idom)) continue;
@@ -335,7 +335,7 @@ static VALUE Memory_Profiler_Graph_compute_idom(VALUE self) {
 			
 			// Update if changed
 			VALUE old_idom = rb_hash_aref(idom_hash, node);
-			if (!rb_equal(old_idom, new_idom)) {
+			if (old_idom != new_idom) {  // Identity comparison
 				rb_hash_aset(idom_hash, node, new_idom);
 				changed = 1;
 			}
