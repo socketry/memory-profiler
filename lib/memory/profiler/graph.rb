@@ -60,9 +60,15 @@ module Memory
 					parents = @parents[object]
 					
 					if parents&.any?
-						parents.map do |parent|
-							name_for(parent, seen) + compute_edge_label(parent, object)
-						end.join(" | ")
+						names = parents.map do |parent|
+							name_for(parent, seen.dup) + "::" + compute_edge_label(parent, object)
+						end
+
+						if names.size > 1
+							return "[#{names.join(" | ")}]"
+						else
+							names.first
+						end
 					else
 						object.class.name.to_s
 					end
@@ -112,7 +118,7 @@ module Memory
 					from.constants.each do |constant|
 						if !from.autoload?(constant) && from.const_defined?(constant)
 							if key = from.const_get(constant) and IS_A.bind_call(key, BasicObject)
-								@names[key] = "::#{constant}"
+								@names[key] = constant
 							end
 						end
 					end
