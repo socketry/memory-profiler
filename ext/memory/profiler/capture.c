@@ -268,6 +268,7 @@ static void Memory_Profiler_Capture_process_newobj(VALUE self, VALUE klass, VALU
 	RB_OBJ_WRITTEN(self, Qnil, data);
 	RB_OBJ_WRITTEN(self, Qnil, allocations);
 
+done:
 	// Resume the capture:
 	capture->paused -= 1;
 }
@@ -387,7 +388,8 @@ static void Memory_Profiler_Capture_event_callback(VALUE self, void *ptr) {
 		if (capture->paused) return;
 		
 		VALUE klass = rb_obj_class(object);
-		
+		if (!klass) return;
+				
 		// Convert to object_id for storage (Integer VALUE).
 		// It's safe to unconditionally call rb_obj_id during NEWOBJ.
 		VALUE object_id = rb_obj_id(object);
