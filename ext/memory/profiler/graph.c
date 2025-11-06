@@ -3,9 +3,7 @@
 
 #include "graph.h"
 #include "allocations.h"
-
-#include "ruby.h"
-#include "ruby/st.h"
+#include <ruby/st.h>
 #include <stdio.h>
 
 static VALUE Memory_Profiler_Graph = Qnil;
@@ -80,6 +78,26 @@ struct Memory_Profiler_Graph_Traverse_Context {
 	VALUE current_parent;  // Current parent being processed (for callback)
 };
 
+// Helper: Check if array contains value (by identity)
+// This avoids calling user-defined == methods which can be buggy
+static int Memory_Profiler_Graph_includes(VALUE array, VALUE value) {
+	long len = RARRAY_LEN(array);
+	for (long i = 0; i < len; i++) {
+		if (rb_ary_entry(array, i) == value) {  // Identity comparison (pointer equality)
+			return 1;  // Found
+		}
+	}
+	return 0;  // Not found
+}
+
+// Helper: Push value to array only if not already present (by identity)
+// This avoids calling user-defined == methods which can be buggy
+static void Memory_Profiler_Graph_push_unique(VALUE array, VALUE value) {
+	if (!Memory_Profiler_Graph_includes(array, value)) {
+		rb_ary_push(array, value);
+	}
+}
+
 // Callback for adding reachable objects to queue
 static void Memory_Profiler_Graph_traverse_callback(VALUE object, void *data) {
 	struct Memory_Profiler_Graph_Traverse_Context *context = (struct Memory_Profiler_Graph_Traverse_Context *)data;
@@ -133,11 +151,8 @@ static VALUE Memory_Profiler_Graph_traverse(VALUE self, VALUE from) {
 				parent_list = rb_ary_new();
 				rb_hash_aset(parents_hash, current, parent_list);
 			}
-			// Only add parent if not already in the list
-			VALUE includes = rb_funcall(parent_list, rb_intern("include?"), 1, parent);
-			if (!RTEST(includes)) {
-				rb_ary_push(parent_list, parent);
-			}
+			// Only add parent if not already in the list (by identity)
+			Memory_Profiler_Graph_push_unique(parent_list, parent);
 		}
 		
 		// Skip traversal if already visited (but we've recorded the parent above)
@@ -286,9 +301,8 @@ static VALUE Memory_Profiler_Graph_compute_idom(VALUE self) {
 		for (long i = 0; i < keys_len; i++) {
 			VALUE node = rb_ary_entry(keys, i);
 			
-			// Skip if this is a root
-			VALUE is_root = rb_funcall(roots, rb_intern("include?"), 1, node);
-			if (RTEST(is_root)) continue;
+			// Skip if this is a root (check by identity)
+			if (Memory_Profiler_Graph_includes(roots, node)) continue;
 			
 			// Get predecessors of this node
 			VALUE preds = rb_hash_aref(predecessors, node);
@@ -478,6 +492,6 @@ void Init_Memory_Profiler_Graph(VALUE Memory_Profiler)
 	
 	// Define the C methods
 	rb_define_method(Memory_Profiler_Graph, "traverse!", Memory_Profiler_Graph_traverse, 1);
-	rb_define_method(Memory_Profiler_Graph, "compute_idom", Memory_Profiler_Graph_compute_idom, 0);
 	rb_define_method(Memory_Profiler_Graph, "roots", Memory_Profiler_Graph_roots_with_idom, 0);
 }
+

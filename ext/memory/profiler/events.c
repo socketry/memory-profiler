@@ -1,11 +1,10 @@
 // Released under the MIT License.
 // Copyright, 2025, by Samuel Williams.
 
-#include "ruby.h"
-#include "ruby/debug.h"
-
 #include "events.h"
 #include "capture.h"
+
+#include <ruby/debug.h>
 #include <stdio.h>
 
 enum {
@@ -179,7 +178,7 @@ int Memory_Profiler_Events_enqueue(
 	VALUE object_id
 ) {
 	struct Memory_Profiler_Events *events = Memory_Profiler_Events_instance();
-
+	
 	// Always enqueue to the available queue - it won't be touched during processing:
 	struct Memory_Profiler_Event *event = Memory_Profiler_Queue_push(events->available);
 	if (event) {

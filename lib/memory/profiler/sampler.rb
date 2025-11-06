@@ -211,9 +211,9 @@ module Memory
 				tree = @call_trees[klass] = CallTree.new
 				
 				# Register callback on allocations object:
-				# - On :newobj - returns state (leaf node) which C extension stores
-				# - On :freeobj - receives state back from C extension
-				allocations.track do |klass, event, state|
+				# - On :newobj - returns data (leaf node) which C extension stores
+				# - On :freeobj - receives data back from C extension
+				allocations.track do |klass, event, data|
 					case event
 					when :newobj
 						# Capture call stack and record in tree
@@ -225,8 +225,8 @@ module Memory
 						end
 						# Return nil or the node - C will store whatever we return.
 					when :freeobj
-						# Decrement using the state (leaf node) passed back from then native extension:
-						state&.decrement_path!
+						# Decrement using the data (leaf node) passed back from then native extension:
+						data&.decrement_path!
 					end
 				rescue Exception => error
 					warn "Error in allocation tracking: #{error.message}\n#{error.backtrace.join("\n")}"
@@ -275,30 +275,31 @@ module Memory
 					result[:allocation_roots] = call_tree_data.as_json
 				end
 				
-				if retained_roots && allocations
-					result[:retained_roots] = compute_roots(allocations)
-				end
-				
-				result
+			if retained_roots && allocations
+				result[:retained_roots] = compute_roots(klass)
 			end
 			
-		private
+			result
+		end
+		
+	private
+		
+		# Compute retaining roots for a class's allocations
+		def compute_roots(klass)
+			graph = Graph.new
 			
-			# Compute retaining roots for a class's allocations
-			def compute_roots(allocations)
-				graph = Graph.new
-				
-				# Add all tracked objects to the graph
-				allocations.each do |object, state|
-					graph.add(object)
-				end
-				
-				# Build parent relationships
-				graph.update!
-				
-				# Return roots analysis
-				graph.roots
+			# Add all tracked objects to the graph
+			# NOTE: States table is now at Capture level, so we use capture.each_object
+			@capture.each_object(klass) do |object, state|
+				graph.add(object)
 			end
+			
+			# Build parent relationships
+			graph.update!
+			
+			# Return roots analysis
+			graph.roots
+		end
 			
 		public
 			

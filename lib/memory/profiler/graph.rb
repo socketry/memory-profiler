@@ -107,7 +107,7 @@ module Memory
 			IS_A = Kernel.method(:is_a?).unbind
 			
 			def extract_names!(from)
-				if from.is_a?(Module)
+				if IS_A.bind_call(from, Module)
 					from.constants.each do |constant|
 						if !from.autoload?(constant) && from.const_defined?(constant)
 							if key = from.const_get(constant) and IS_A.bind_call(key, BasicObject)
@@ -115,7 +115,7 @@ module Memory
 							end
 						end
 					end
-				elsif from.is_a?(Object)
+				elsif IS_A.bind_call(from, Object)
 					from.instance_variables.each do |variable|
 						if key = from.instance_variable_get(variable) and IS_A.bind_call(key, BasicObject)
 							@names[key] = variable
