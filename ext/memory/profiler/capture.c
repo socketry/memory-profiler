@@ -15,8 +15,6 @@ enum {
 };
 
 static VALUE Memory_Profiler_Capture = Qnil;
-static VALUE rb_mObjectSpace = Qnil;
-static ID id_id2ref = Qnil;
 
 // Event symbols:
 static VALUE sym_newobj, sym_freeobj;
@@ -629,36 +627,38 @@ static VALUE Memory_Profiler_Capture_each(VALUE self) {
 	return self;
 }
 
-// Struct for filtering states by allocations wrapper during iteration
-struct Memory_Profiler_Each_Object_Args {
+// Struct for filtering states during each_object_id iteration
+struct Memory_Profiler_Each_Object_Id_Args {
 	VALUE allocations;  // The allocations wrapper to filter by (Qnil = no filter)
 };
 
-// Iterator callback for each_object - yields object and state
-static int Memory_Profiler_Capture_each_object_callback(st_data_t key, st_data_t value, st_data_t arg) {
+// Iterator callback for each_object_id - yields object_id and state
+static int Memory_Profiler_Capture_each_object_id_callback(st_data_t key, st_data_t value, st_data_t arg) {
 	VALUE object_id = (VALUE)key;
 	struct Memory_Profiler_Capture_State *state = (struct Memory_Profiler_Capture_State *)value;
-	struct Memory_Profiler_Each_Object_Args *args = (struct Memory_Profiler_Each_Object_Args *)arg;
+	struct Memory_Profiler_Each_Object_Id_Args *args = (struct Memory_Profiler_Each_Object_Id_Args *)arg;
 	
 	// Filter by allocations if specified
 	if (!NIL_P(args->allocations) && state->allocations != args->allocations) {
 		return ST_CONTINUE;
 	}
 	
-	// Convert object_id to object using _id2ref
-	VALUE object = rb_funcall(rb_mObjectSpace, id_id2ref, 1, object_id);
-	
-	// Yield object and state
-	rb_yield_values(2, object, state->data);
+	// Yield object_id (Integer) and state - no _id2ref needed!
+	rb_yield_values(2, object_id, state->data);
 	
 	return ST_CONTINUE;
 }
 
-// Iterate over tracked objects, optionally filtered by class
+// Iterate over tracked object IDs, optionally filtered by class
 // Called as: 
-//   capture.each_object(String) { |object, state| ... }  # Specific class
-//   capture.each_object { |object, state| ... }          # All objects
-static VALUE Memory_Profiler_Capture_each_object(int argc, VALUE *argv, VALUE self) {
+//   capture.each_object_id(String) { |object_id, state| ... }  # Specific class
+//   capture.each_object_id { |object_id, state| ... }          // All objects
+// 
+// Yields object_id as Integer. Caller can:
+//   - Format as hex: "0x%x" % object_id
+//   - Convert to object with ObjectSpace._id2ref (may raise RangeError if recycled)
+// Future-proof for Ruby 3.5 where _id2ref is deprecated
+static VALUE Memory_Profiler_Capture_each_object_id(int argc, VALUE *argv, VALUE self) {
 	struct Memory_Profiler_Capture *capture;
 	TypedData_Get_Struct(self, struct Memory_Profiler_Capture, &Memory_Profiler_Capture_type, capture);
 	
@@ -680,21 +680,18 @@ static VALUE Memory_Profiler_Capture_each_object(int argc, VALUE *argv, VALUE se
 		if (st_lookup(capture->tracked, (st_data_t)klass, &allocations_data)) {
 			allocations = (VALUE)allocations_data;
 		} else {
-			// Class not tracked - nothing to iterate
-			if (RTEST(was_enabled)) {
-				rb_gc_enable();
-			}
-			return self;
+			goto done;
 		}
 	}
 	
 	// Iterate states table, optionally filtering by allocations wrapper
-	struct Memory_Profiler_Each_Object_Args args = { .allocations = allocations };
+	struct Memory_Profiler_Each_Object_Id_Args args = { .allocations = allocations };
 	
 	if (capture->states) {
-		st_foreach(capture->states, Memory_Profiler_Capture_each_object_callback, (st_data_t)&args);
+		st_foreach(capture->states, Memory_Profiler_Capture_each_object_id_callback, (st_data_t)&args);
 	}
-	
+
+done:
 	if (RTEST(was_enabled)) {
 		rb_gc_enable();
 	}
@@ -814,18 +811,13 @@ void Init_Memory_Profiler_Capture(VALUE Memory_Profiler)
 	rb_define_method(Memory_Profiler_Capture, "tracking?", Memory_Profiler_Capture_tracking_p, 1);
 	rb_define_method(Memory_Profiler_Capture, "retained_count_of", Memory_Profiler_Capture_retained_count_of, 1);
 	rb_define_method(Memory_Profiler_Capture, "each", Memory_Profiler_Capture_each, 0);
-	rb_define_method(Memory_Profiler_Capture, "each_object", Memory_Profiler_Capture_each_object, -1);  // -1 = variable args
+	rb_define_method(Memory_Profiler_Capture, "each_object_id", Memory_Profiler_Capture_each_object_id, -1);  // -1 = variable args
 	rb_define_method(Memory_Profiler_Capture, "[]", Memory_Profiler_Capture_aref, 1);
 	rb_define_method(Memory_Profiler_Capture, "clear", Memory_Profiler_Capture_clear, 0);
 	rb_define_method(Memory_Profiler_Capture, "statistics", Memory_Profiler_Capture_statistics, 0);
 	rb_define_method(Memory_Profiler_Capture, "new_count", Memory_Profiler_Capture_new_count, 0);
 	rb_define_method(Memory_Profiler_Capture, "free_count", Memory_Profiler_Capture_free_count, 0);
 	rb_define_method(Memory_Profiler_Capture, "retained_count", Memory_Profiler_Capture_retained_count, 0);
-	
-	// Cache ObjectSpace module for _id2ref calls
-	rb_mObjectSpace = rb_const_get(rb_cObject, rb_intern("ObjectSpace"));
-	rb_gc_register_mark_object(rb_mObjectSpace);
-	id_id2ref = rb_intern("_id2ref");
 	
 	// Initialize Allocations class
 	Init_Memory_Profiler_Allocations(Memory_Profiler);

@@ -28,7 +28,7 @@ end
 
 describe Memory::Profiler::Graph do
 	let(:graph) {subject.new}
-
+	
 	before do
 		GC.start
 	end

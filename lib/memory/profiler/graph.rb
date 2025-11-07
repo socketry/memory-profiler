@@ -34,7 +34,7 @@ module Memory
 				@root = from
 				@parents.clear
 				@internals.clear
-
+				
 				# If the user has provided a specific object, try to avoid traversing the root Object.
 				if from != Object
 					@parents[Object] = nil
@@ -125,7 +125,7 @@ module Memory
 			end
 			
 		private
-
+			
 			IS_A = Kernel.method(:is_a?).unbind
 			RESPOND_TO = Kernel.method(:respond_to?).unbind
 			EQUAL = Kernel.method(:equal?).unbind
@@ -146,7 +146,7 @@ module Memory
 						if IS_A.bind_call(child, ObjectSpace::InternalObjectWrapper)
 							# There is no value in scanning internal objects.
 							next if child.type == :T_IMEMO
-
+							
 							# We need to handle internal objects differently, because they don't follow the same equality/identity rules. Since we can reach the same internal object from multiple parents, we need to use an appropriate key to track it. Otherwise, the objects will not be counted on subsequent parent traversals.
 							key = [parent.object_id, child.internal_object_id]
 							if @internals.add?(key)

@@ -142,7 +142,7 @@ module Memory
 			def stop
 				@capture.stop
 			end
-
+			
 			# Clear tracking data for a class.
 			def clear(klass)
 				tree = @call_trees[klass]
@@ -280,48 +280,67 @@ module Memory
 			#
 			# @parameter klass [Class] The class to get statistics for.
 			# @parameter allocation_roots [Boolean] Include call tree showing where allocations occurred (default: true if available).
-			# @parameter retained_roots [Boolean] Compute object graph showing what's retaining allocations (default: true, can be slow for large graphs).
-			# @parameter roots_from [Object] Starting point for retained roots analysis (default: Object).
-			# @returns [Hash] Statistics including allocations, allocation_roots (call tree), and retained_roots (object graph).
-			def analyze(klass, allocation_roots: true, retained_roots: false, retained_objects: true)
-				call_tree_data = @call_trees[klass] if allocation_roots
-				allocations = @capture[klass]
+			# @parameter retained_roots [Boolean] Compute object graph showing what's retaining allocations (default: false, can be slow for large graphs).
+			# @parameter retained_addresses [Boolean | Integer] Include memory addresses of retained objects for correlation with heap dumps (default: 1000).
+			# @returns [Hash] Statistics including allocations, allocation_roots (call tree), retained_roots (object graph), and retained_addresses (array of memory addresses)	.
+			def analyze(klass, allocation_roots: true, retained_roots: false, retained_addresses: 1000, retained_minimum: 100)
+				unless allocations = @capture[klass]
+					return nil
+				end
 				
-				return nil unless call_tree_data or allocations
+				if retained_minimum && allocations.retained_count < retained_minimum
+					return nil
+				end
 				
 				result = {
 					allocations: allocations&.as_json,
 				}
 				
-				if allocation_roots && call_tree_data
-					result[:allocation_roots] = call_tree_data.as_json
+				if allocation_roots
+					if call_tree_data = @call_trees[klass]
+						result[:allocation_roots] = call_tree_data.as_json
+					end
 				end
 				
 				if retained_roots
 					result[:retained_roots] = compute_roots(klass)
 				end
 				
+		if retained_addresses
+			addresses = []
+			@capture.each_object_id(klass) do |object_id, state|
+				addresses << "0x%x" % object_id
+				break if retained_addresses.is_a?(Integer) && addresses.size >= retained_addresses
+			end
+			
+			result[:retained_addresses] = addresses
+		end
+				
 				result
 			end
 			
 		private
-
-			# Compute retaining roots for a class's allocations
-			def compute_roots(klass)
-				graph = Graph.new
-				
-				# Add all tracked objects to the graph
-				# NOTE: States table is now at Capture level, so we use capture.each_object
-				@capture.each_object(klass) do |object, state|
+			
+		# Compute retaining roots for a class's allocations.
+		def compute_roots(klass)
+			graph = Graph.new
+			
+			# Add all tracked objects to the graph:
+			@capture.each_object_id(klass) do |object_id, state|
+				begin
+					object = ObjectSpace._id2ref(object_id)
 					graph.add(object)
+				rescue RangeError
+					# Object was recycled, skip it
 				end
-				
-				# Build parent relationships
-				graph.update!
-				
-				# Return roots analysis
-				graph.roots
 			end
+			
+			# Build parent relationships:
+			graph.update!
+			
+			# Return roots analysis:
+			graph.roots
+		end
 			
 			# Default filter to include all locations.
 			def default_filter
