@@ -22,6 +22,11 @@ Please see the [project documentation](https://socketry.github.io/memory-profile
 
 Please see the [project releases](https://socketry.github.io/memory-profiler/releases/index) for all releases.
 
+### v1.4.0
+
+  - Implement [Cooper-Harvey-Kennedy](https://www.cs.tufts.edu/~nr/cs257/archive/keith-cooper/dom14.pdf) algorithm for finding root objects in memory leaks.
+  - Rework capture to track objects by `object_id` exclusively.
+
 ### v1.3.0
 
   - **Breaking**: Renamed `Capture#count_for` to `Capture#retained_count_of` for better clarity and consistency.
@@ -74,10 +79,6 @@ Please see the [project releases](https://socketry.github.io/memory-profiler/rel
 ### v1.1.9
 
   - More write barriers...
-
-### v1.1.8
-
-  - Use single global queue for event handling to avoid incorrect ordering.
 
 ## Contributing
 
