@@ -21,6 +21,7 @@ struct Memory_Profiler_Object_Table* Memory_Profiler_Object_Table_new(size_t ini
 	
 	table->capacity = initial_capacity > 0 ? initial_capacity : INITIAL_CAPACITY;
 	table->count = 0;
+	table->strong = 0;  // Start as weak table (strong == 0 means weak)
 	
 	// Use calloc to zero out entries (Qnil = 0)
 	table->entries = calloc(table->capacity, sizeof(struct Memory_Profiler_Object_Table_Entry));
@@ -192,10 +193,13 @@ void Memory_Profiler_Object_Table_mark(struct Memory_Profiler_Object_Table *tabl
 	for (size_t i = 0; i < table->capacity; i++) {
 		struct Memory_Profiler_Object_Table_Entry *entry = &table->entries[i];
 		if (entry->object != 0) {
-			// DO NOT mark entry->object - we want WEAK reference tracking!
-			// The object key should be allowed to be GC'd (that's how we detect frees)
+			// Mark object key if table is strong (strong > 0)
+			// When weak (strong == 0), object keys can be GC'd (that's how we detect frees)
+			if (table->strong > 0) {
+				rb_gc_mark_movable(entry->object);
+			}
 			
-			// DO mark the other fields (klass, data, allocations) - we own these
+			// Always mark the other fields (klass, data, allocations) - we own these
 			if (entry->klass) rb_gc_mark_movable(entry->klass);
 			if (entry->data) rb_gc_mark_movable(entry->data);
 			if (entry->allocations) rb_gc_mark_movable(entry->allocations);
@@ -321,5 +325,19 @@ void Memory_Profiler_Object_Table_delete_entry(struct Memory_Profiler_Object_Tab
 // Get current size
 size_t Memory_Profiler_Object_Table_size(struct Memory_Profiler_Object_Table *table) {
 	return table->count;
+}
+
+// Increment strong reference count (makes table strong when > 0)
+void Memory_Profiler_Object_Table_increment_strong(struct Memory_Profiler_Object_Table *table) {
+	if (table) {
+		table->strong++;
+	}
+}
+
+// Decrement strong reference count (makes table weak when == 0)
+void Memory_Profiler_Object_Table_decrement_strong(struct Memory_Profiler_Object_Table *table) {
+	if (table && table->strong > 0) {
+		table->strong--;
+	}
 }
 

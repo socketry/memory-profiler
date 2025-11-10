@@ -558,49 +558,31 @@ static VALUE Memory_Profiler_Capture_each(VALUE self) {
 	return self;
 }
 
-// Struct for filtering states during each_object_id iteration
-struct Memory_Profiler_Each_Object_Id_Args {
-	VALUE allocations;  // The allocations wrapper to filter by (Qnil = no filter)
+// Struct for filtering states during each_object iteration
+struct Memory_Profiler_Each_Object_Arguments {
+	VALUE self;
+	
+	// The allocations wrapper to filter by (Qnil = no filter).
+	VALUE allocations;
 };
 
-// Iterate over tracked object IDs, optionally filtered by class
-// Called as: 
-//   capture.each_object_id(String) { |object_id, state| ... }  # Specific class
-//   capture.each_object_id { |object_id, state| ... }          // All objects
-// 
-// Yields object_id as Integer. Caller can:
-//   - Format as hex: "0x%x" % object_id
-//   - Convert to object with ObjectSpace._id2ref (may raise RangeError if recycled)
-// Future-proof for Ruby 3.5 where _id2ref is deprecated
-static VALUE Memory_Profiler_Capture_each_object_id(int argc, VALUE *argv, VALUE self) {
+// Cleanup function to ensure table is made weak again
+static VALUE Memory_Profiler_Capture_each_object_ensure(VALUE arg) {
+	struct Memory_Profiler_Each_Object_Arguments *arguments = (struct Memory_Profiler_Each_Object_Arguments *)arg;
 	struct Memory_Profiler_Capture *capture;
-	TypedData_Get_Struct(self, struct Memory_Profiler_Capture, &Memory_Profiler_Capture_type, capture);
+	TypedData_Get_Struct(arguments->self, struct Memory_Profiler_Capture, &Memory_Profiler_Capture_type, capture);
 	
-	VALUE klass;
-	rb_scan_args(argc, argv, "01", &klass);
+	// Make table weak again
+	Memory_Profiler_Object_Table_decrement_strong(capture->states);
 	
-	RETURN_ENUMERATOR(self, argc, argv);
-	
-	// Process all pending events and run GC to clean up stale object_ids
-	Memory_Profiler_Events_process_all();
-	rb_gc_start();
-	VALUE was_enabled = rb_gc_disable();
-	Memory_Profiler_Events_process_all();
-	
-	// If class provided, look up its allocations wrapper
-	VALUE allocations = Qnil;
-	if (!NIL_P(klass)) {
-		st_data_t allocations_data;
-		if (st_lookup(capture->tracked, (st_data_t)klass, &allocations_data)) {
-			allocations = (VALUE)allocations_data;
-		} else {
-			// Class not tracked - nothing to iterate
-			if (RTEST(was_enabled)) {
-				rb_gc_enable();
-			}
-			return self;
-		}
-	}
+	return Qnil;
+}
+
+// Main iteration function
+static VALUE Memory_Profiler_Capture_each_object_body(VALUE arg) {
+	struct Memory_Profiler_Each_Object_Arguments *arguments = (struct Memory_Profiler_Each_Object_Arguments *)arg;
+	struct Memory_Profiler_Capture *capture;
+	TypedData_Get_Struct(arguments->self, struct Memory_Profiler_Capture, &Memory_Profiler_Capture_type, capture);
 	
 	// Iterate custom object table entries
 	if (capture->states) {
@@ -615,23 +597,65 @@ static VALUE Memory_Profiler_Capture_each_object_id(int argc, VALUE *argv, VALUE
 			}
 			
 			// Filter by allocations if specified
-			if (!NIL_P(allocations)) {
-				if (entry->allocations != allocations) continue;
+			if (!NIL_P(arguments->allocations)) {
+				if (entry->allocations != arguments->allocations) continue;
 			}
 			
-			// Extract data and yield
-			VALUE object_id = rb_obj_id(entry->object);
-			
-			fprintf(stderr, "[ITER]   Yielding object_id=%ld\n", NUM2LONG(object_id));
-			rb_yield_values(2, object_id);
+			rb_yield_values(2, entry->object, entry->allocations);
 		}
 	}
 	
-	if (RTEST(was_enabled)) {
-		rb_gc_enable();
+	return arguments->self;
+}
+
+// Iterate over tracked object IDs, optionally filtered by class
+// Called as: 
+//   capture.each_object(String) { |object_id, state| ... }  # Specific class
+//   capture.each_object { |object_id, state| ... }          // All objects
+// 
+// Yields object_id as Integer. Caller can:
+//   - Format as hex: "0x%x" % object_id
+//   - Convert to object with ObjectSpace._id2ref (may raise RangeError if recycled)
+// Future-proof for Ruby 3.5 where _id2ref is deprecated
+static VALUE Memory_Profiler_Capture_each_object(int argc, VALUE *argv, VALUE self) {
+	struct Memory_Profiler_Capture *capture;
+	TypedData_Get_Struct(self, struct Memory_Profiler_Capture, &Memory_Profiler_Capture_type, capture);
+	
+	VALUE klass;
+	rb_scan_args(argc, argv, "01", &klass);
+	
+	RETURN_ENUMERATOR(self, argc, argv);
+	
+	// Make table strong so objects won't be collected during iteration
+	Memory_Profiler_Object_Table_increment_strong(capture->states);
+	
+	// Process all pending events and run GC to clean up stale objects:
+	Memory_Profiler_Events_process_all();
+	
+	// If class provided, look up its allocations wrapper
+	VALUE allocations = Qnil;
+	if (!NIL_P(klass)) {
+		st_data_t allocations_data;
+		if (st_lookup(capture->tracked, (st_data_t)klass, &allocations_data)) {
+			allocations = (VALUE)allocations_data;
+		} else {
+			// Class not tracked - nothing to iterate
+			Memory_Profiler_Object_Table_decrement_strong(capture->states);
+			return self;
+		}
 	}
 	
-	return self;
+	// Setup arguments for iteration
+	struct Memory_Profiler_Each_Object_Arguments arguments = {
+		.self = self,
+		.allocations = allocations
+	};
+	
+	// Use rb_ensure to guarantee cleanup even if exception is raised
+	return rb_ensure(
+		Memory_Profiler_Capture_each_object_body, (VALUE)&arguments,
+		Memory_Profiler_Capture_each_object_ensure, (VALUE)&arguments
+	);
 }
 
 // Get allocations for a specific class
@@ -716,7 +740,7 @@ void Init_Memory_Profiler_Capture(VALUE Memory_Profiler)
 	rb_define_method(Memory_Profiler_Capture, "tracking?", Memory_Profiler_Capture_tracking_p, 1);
 	rb_define_method(Memory_Profiler_Capture, "retained_count_of", Memory_Profiler_Capture_retained_count_of, 1);
 	rb_define_method(Memory_Profiler_Capture, "each", Memory_Profiler_Capture_each, 0);
-	rb_define_method(Memory_Profiler_Capture, "each_object_id", Memory_Profiler_Capture_each_object_id, -1);  // -1 = variable args
+	rb_define_method(Memory_Profiler_Capture, "each_object", Memory_Profiler_Capture_each_object, -1);  // -1 = variable args
 	rb_define_method(Memory_Profiler_Capture, "[]", Memory_Profiler_Capture_aref, 1);
 	rb_define_method(Memory_Profiler_Capture, "clear", Memory_Profiler_Capture_clear, 0);
 	rb_define_method(Memory_Profiler_Capture, "statistics", Memory_Profiler_Capture_statistics, 0);
