@@ -22,6 +22,14 @@ Please see the [project documentation](https://socketry.github.io/memory-profile
 
 Please see the [project releases](https://socketry.github.io/memory-profiler/releases/index) for all releases.
 
+### v1.5.0
+
+  - Add `Capture#each_object` for getting all retained objects.
+  - Add `retained_addresses:` option to `Sampler#analyze` to capture addresses.
+  - Add `Sampler#analyze(retained_minimum: 100)` - if the retained\_size is less than this, the analyse won't proceed.
+  - Remove `Memory::Profiler::Graph` - it's too slow for practical use.
+  - Add `Memory::Profiler.address_of(object)` to get the memory address of an object.
+
 ### v1.4.0
 
   - Implement [Cooper-Harvey-Kennedy](https://www.cs.tufts.edu/~nr/cs257/archive/keith-cooper/dom14.pdf) algorithm for finding root objects in memory leaks.
@@ -75,10 +83,6 @@ Please see the [project releases](https://socketry.github.io/memory-profiler/rel
   - **Critical:** Fixed GC crash during compaction caused by missing write barriers in event queue.
   - Fixed allocation/deallocation counts being inaccurate when objects are allocated during callbacks or freed after compaction.
   - `Capture#clear` now raises `RuntimeError` if called while capture is running. Call `stop()` before `clear()`.
-
-### v1.1.9
-
-  - More write barriers...
 
 ## Contributing
 
