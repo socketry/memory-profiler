@@ -1,7 +1,8 @@
 #!/usr/bin/env ruby
+# frozen_string_literal: true
 
-require_relative '../config/environment'
-require_relative '../lib/memory/profiler'
+require_relative "../config/environment"
+require_relative "../lib/memory/profiler"
 
 puts "Memory Profiler Stress Test"
 puts "=" * 80
@@ -37,15 +38,15 @@ start_time = Time.now
 
 # Create retained objects first
 (RETAINED_COUNT / 3).times do |i|
-  retained_hashes << {key: i, value: "hash_#{i}"}
-  retained_strings << "string_#{i}_" * 10
-  retained_arrays << [i, i * 2, i * 3]
-  
-  if (i + 1) % 10_000 == 0
-    elapsed = Time.now - start_time
-    rate = (i + 1) / elapsed
-    puts "  Created #{(i + 1) * 3} retained objects (#{rate.round(0)} objects/sec)"
-  end
+	retained_hashes << {key: i, value: "hash_#{i}"}
+	retained_strings << "string_#{i}_" * 10
+	retained_arrays << [i, i * 2, i * 3]
+	
+	if (i + 1) % 10_000 == 0
+		elapsed = Time.now - start_time
+		rate = (i + 1) / elapsed
+		puts "  Created #{(i + 1) * 3} retained objects (#{rate.round(0)} objects/sec)"
+	end
 end
 
 puts "\nPhase 2: Creating #{CHURNED_COUNT} churned objects (with GC)..."
@@ -57,41 +58,41 @@ gc_count = 0
 
 # Create churned objects in batches with periodic GC
 while churned_so_far < CHURNED_COUNT
-  # Create a batch of temporary objects
-  batch_size.times do |i|
-    case i % 3
-    when 0
-      temp = {temp: true, value: churned_so_far}
-    when 1
-      temp = "temporary_string_#{churned_so_far}"
-    when 2
-      temp = [churned_so_far, churned_so_far * 2]
-    end
-    temp = nil  # Let it be GC'd
-    
-    churned_so_far += 1
-    break if churned_so_far >= CHURNED_COUNT
-  end
-  
-  # Periodic GC to create tombstones and test deletion performance
-  if churned_so_far % 100_000 == 0
-    GC.start
-    gc_count += 1
-    elapsed = Time.now - churn_start
-    rate = churned_so_far / elapsed
-    
-    hash_count = capture.retained_count_of(Hash)
-    string_count = capture.retained_count_of(String)
-    array_count = capture.retained_count_of(Array)
-    total_live = hash_count + string_count + array_count
-    
-    puts "  Churned: #{churned_so_far} | Live: #{total_live} | GCs: #{gc_count} | Rate: #{rate.round(0)} obj/sec"
-  end
+	# Create a batch of temporary objects
+	batch_size.times do |i|
+		case i % 3
+		when 0
+			temp = {temp: true, value: churned_so_far}
+		when 1
+			temp = "temporary_string_#{churned_so_far}"
+		when 2
+			temp = [churned_so_far, churned_so_far * 2]
+		end
+		temp = nil  # Let it be GC'd
+		
+		churned_so_far += 1
+		break if churned_so_far >= CHURNED_COUNT
+	end
+	
+	# Periodic GC to create tombstones and test deletion performance
+	if churned_so_far % 100_000 == 0
+		GC.start
+		gc_count += 1
+		elapsed = Time.now - churn_start
+		rate = churned_so_far / elapsed
+		
+		hash_count = capture.retained_count_of(Hash)
+		string_count = capture.retained_count_of(String)
+		array_count = capture.retained_count_of(Array)
+		total_live = hash_count + string_count + array_count
+		
+		puts "  Churned: #{churned_so_far} | Live: #{total_live} | GCs: #{gc_count} | Rate: #{rate.round(0)} obj/sec"
+	end
 end
 
 # Final GC to clean up any remaining temporary objects
 puts "\nPhase 3: Final cleanup..."
-3.times { GC.start }
+3.times{GC.start}
 
 end_time = Time.now
 total_time = end_time - start_time
@@ -125,11 +126,11 @@ tolerance = expected * 0.1  # Allow 10% variance due to GC timing
 diff = (total_live - expected).abs
 
 if diff < tolerance
-  puts "  ✅ Object count within expected range"
-  puts "     Expected: ~#{expected}, Got: #{total_live} (diff: #{diff})"
+	puts "  ✅ Object count within expected range"
+	puts "     Expected: ~#{expected}, Got: #{total_live} (diff: #{diff})"
 else
-  puts "  ⚠️  Object count outside expected range"
-  puts "     Expected: ~#{expected}, Got: #{total_live} (diff: #{diff})"
+	puts "  ⚠️  Object count outside expected range"
+	puts "     Expected: ~#{expected}, Got: #{total_live} (diff: #{diff})"
 end
 
 # Check for any warnings in stderr (they would have been printed during the test)

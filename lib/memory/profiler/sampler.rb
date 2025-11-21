@@ -318,7 +318,7 @@ module Memory
 			
 			# Default filter to include all locations.
 			def default_filter
-				->(location) {true}
+				->(location){true}
 			end
 			
 			def prune_call_trees!
