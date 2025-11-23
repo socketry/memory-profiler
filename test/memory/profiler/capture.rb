@@ -55,6 +55,7 @@ describe Memory::Profiler::Capture do
 	
 	with "#retained_count_of" do
 		it "tracks allocations for a class" do
+			capture.track_all = true
 			capture.start
 			
 			initial_count = capture.retained_count_of(Hash)
@@ -226,6 +227,9 @@ describe Memory::Profiler::Capture do
 			capture1 = Memory::Profiler::Capture.new
 			capture2 = Memory::Profiler::Capture.new
 			
+			capture1.track_all = true
+			capture2.track_all = true
+			
 			capture1.track(Hash)
 			capture2.track(Array)
 			
@@ -350,6 +354,7 @@ describe Memory::Profiler::Capture do
 	
 	with "#new_count, #free_count, #retained_count" do
 		it "tracks total allocations across all classes" do
+			capture.track_all = true
 			capture.start
 			
 			# Allocate various objects
@@ -372,6 +377,7 @@ describe Memory::Profiler::Capture do
 		it "tracks frees when objects are collected" do
 			GC.start
 			
+			capture.track_all = true
 			capture.start
 			
 			initial_new = capture.new_count
@@ -395,6 +401,7 @@ describe Memory::Profiler::Capture do
 		it "retained_count reflects objects still alive" do
 			GC.start
 			
+			capture.track_all = true
 			capture.start
 			
 			# Allocate and retain some objects
@@ -418,6 +425,7 @@ describe Memory::Profiler::Capture do
 		end
 		
 		it "counts reset after clear" do
+			capture.track_all = true
 			capture.start
 			
 			20.times{Hash.new}

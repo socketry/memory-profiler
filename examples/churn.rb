@@ -121,7 +121,9 @@ puts "  GC cycles:        #{gc_count.to_s.rjust(10)}"
 puts
 
 puts "Verification:"
-expected = RETAINED_COUNT
+# Expected count accounts for: Hash + String (hash value) + String + Array = 4 objects per iteration
+# So: (RETAINED_COUNT / 3) * 4 = RETAINED_COUNT * 4 / 3
+expected = (RETAINED_COUNT * 4 / 3).round
 tolerance = expected * 0.1  # Allow 10% variance due to GC timing
 diff = (total_live - expected).abs
 

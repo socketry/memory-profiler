@@ -28,6 +28,9 @@ struct Memory_Profiler_Capture {
 	// Should we queue callbacks? (temporarily disabled during queue processing).
 	int paused;
 
+	// Should we automatically track all classes? (if false, only explicitly tracked classes are tracked).
+	int track_all;
+
 	// Tracked classes: class => VALUE (wrapped Memory_Profiler_Capture_Allocations).
 	st_table *tracked;
 	
@@ -163,21 +166,18 @@ static void Memory_Profiler_Capture_process_newobj(VALUE self, VALUE klass, VALU
 	// Pause the capture to prevent infinite loop:
 	capture->paused += 1;
 	
-	// Increment global new count:
-	capture->new_count++;
-	
-	// Look up or create allocations record for this class:
+	// Look up allocations record for this class:
 	st_data_t allocations_data;
 	VALUE allocations;
 	struct Memory_Profiler_Capture_Allocations *record;
 	
 	if (st_lookup(capture->tracked, (st_data_t)klass, &allocations_data)) {
-		// Existing record
+		// Existing record - class is explicitly tracked
 		allocations = (VALUE)allocations_data;
 		record = Memory_Profiler_Allocations_get(allocations);
 		record->new_count++;
-	} else {
-		// First time seeing this class, create record automatically
+	} else if (capture->track_all) {
+		// First time seeing this class, create record automatically (if track_all is enabled)
 		record = ALLOC(struct Memory_Profiler_Capture_Allocations);
 		record->callback = Qnil;
 		record->new_count = 1;
@@ -187,7 +187,14 @@ static void Memory_Profiler_Capture_process_newobj(VALUE self, VALUE klass, VALU
 		st_insert(capture->tracked, (st_data_t)klass, (st_data_t)allocations);
 		RB_OBJ_WRITTEN(self, Qnil, klass);
 		RB_OBJ_WRITTEN(self, Qnil, allocations);
+	} else {
+		// track_all disabled and class not explicitly tracked - skip this allocation entirely
+		capture->paused -= 1;
+		return;
 	}
+	
+	// Increment global new count (only if we're tracking this class):
+	capture->new_count++;
 	
 	VALUE data = Qnil;
 	if (!NIL_P(record->callback)) {
@@ -367,9 +374,10 @@ static VALUE Memory_Profiler_Capture_alloc(VALUE klass) {
 	capture->new_count = 0;
 	capture->free_count = 0;
 	
-	// Initialize state flags - not running, callbacks disabled
+	// Initialize state flags - not running, callbacks disabled, track_all disabled by default
 	capture->running = 0;
 	capture->paused = 0;
+	capture->track_all = 0;
 	
 	// Global event queue system will auto-initialize on first use (lazy initialization)
 	
@@ -379,6 +387,24 @@ static VALUE Memory_Profiler_Capture_alloc(VALUE klass) {
 // Initialize capture
 static VALUE Memory_Profiler_Capture_initialize(VALUE self) {
 	return self;
+}
+
+// Get track_all setting
+static VALUE Memory_Profiler_Capture_track_all_get(VALUE self) {
+	struct Memory_Profiler_Capture *capture;
+	TypedData_Get_Struct(self, struct Memory_Profiler_Capture, &Memory_Profiler_Capture_type, capture);
+	
+	return capture->track_all ? Qtrue : Qfalse;
+}
+
+// Set track_all setting
+static VALUE Memory_Profiler_Capture_track_all_set(VALUE self, VALUE value) {
+	struct Memory_Profiler_Capture *capture;
+	TypedData_Get_Struct(self, struct Memory_Profiler_Capture, &Memory_Profiler_Capture_type, capture);
+	
+	capture->track_all = RTEST(value) ? 1 : 0;
+	
+	return value;
 }
 
 // Start capturing allocations
@@ -744,6 +770,8 @@ void Init_Memory_Profiler_Capture(VALUE Memory_Profiler)
 	rb_define_alloc_func(Memory_Profiler_Capture, Memory_Profiler_Capture_alloc);
 	
 	rb_define_method(Memory_Profiler_Capture, "initialize", Memory_Profiler_Capture_initialize, 0);
+	rb_define_method(Memory_Profiler_Capture, "track_all", Memory_Profiler_Capture_track_all_get, 0);
+	rb_define_method(Memory_Profiler_Capture, "track_all=", Memory_Profiler_Capture_track_all_set, 1);
 	rb_define_method(Memory_Profiler_Capture, "start", Memory_Profiler_Capture_start, 0);
 	rb_define_method(Memory_Profiler_Capture, "stop", Memory_Profiler_Capture_stop, 0);
 	rb_define_method(Memory_Profiler_Capture, "track", Memory_Profiler_Capture_track, -1);  // -1 to accept block

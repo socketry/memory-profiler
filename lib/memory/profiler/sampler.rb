@@ -104,6 +104,7 @@ module Memory
 				@gc = gc
 				
 				@capture = Capture.new
+				@capture.track_all = true
 				@call_trees = {}
 				@samples = {}
 			end

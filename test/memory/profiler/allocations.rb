@@ -50,6 +50,7 @@ describe Memory::Profiler::Allocations do
 	with "integration with Capture" do
 		it "returns correct JSON from captured allocations" do
 			capture = Memory::Profiler::Capture.new
+			capture.track_all = true
 			capture.start
 			
 			# Create some objects
