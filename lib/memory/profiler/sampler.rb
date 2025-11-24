@@ -95,7 +95,8 @@ module Memory
 			# @parameter prune_limit [Integer] Keep only top N children per node during pruning (default: 5).
 			# @parameter prune_threshold [Integer] Number of insertions before auto-pruning (nil = no auto-pruning).
 			# @parameter gc [Hash | Nil] Run GC with these options before each sample (nil = don't run GC).
-			def initialize(depth: 4, filter: nil, increases_threshold: 10, prune_limit: 5, prune_threshold: nil, gc: nil)
+			# @parameter track_all [Boolean] Automatically track all classes that allocate objects (default: true).
+			def initialize(depth: 4, filter: nil, increases_threshold: 10, prune_limit: 5, prune_threshold: nil, gc: nil, track_all: true)
 				@depth = depth
 				@filter = filter || default_filter
 				@increases_threshold = increases_threshold
@@ -104,7 +105,7 @@ module Memory
 				@gc = gc
 				
 				@capture = Capture.new
-				@capture.track_all = true
+				@capture.track_all = track_all
 				@call_trees = {}
 				@samples = {}
 			end
