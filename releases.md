@@ -1,5 +1,9 @@
 # Releases
 
+## Unreleased
+
+  - Fix GC handling during `each_object` (it was incorrectly inverted).
+
 ## v1.6.2
 
   - Ensure all `FREEOBJ` events are enqueued.

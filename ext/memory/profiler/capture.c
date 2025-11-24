@@ -678,8 +678,8 @@ static VALUE Memory_Profiler_Capture_each_object(int argc, VALUE *argv, VALUE se
 	}
 
 	// Disable GC to prevent objects from being collected during iteration
-	// rb_gc_disable returns the previous state (non-zero = was enabled, 0 = was disabled)
-	int gc_was_enabled = RTEST(rb_gc_disable());
+	// rb_gc_disable returns Qfalse if GC was enabled before, Qtrue if GC was disabled before
+	int gc_was_enabled = (rb_gc_disable() == Qfalse);
 	
 	// Process all pending events to clean up stale entries:
 	Memory_Profiler_Events_process_all();

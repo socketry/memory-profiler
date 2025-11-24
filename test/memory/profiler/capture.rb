@@ -713,4 +713,88 @@ describe Memory::Profiler::Capture do
 			expect(capture.retained_count_of(Array)).to be >= 0
 		end
 	end
+	
+	with "#each_object" do
+		def gc_enabled?
+			if GC.enable == false
+				return true
+			else
+				GC.disable
+				return false
+			end
+		end
+
+		it "re-enables GC after iteration completes" do
+			capture.track(Hash)
+			capture.start
+			
+			# Allocate some objects
+			5.times{Hash.new}
+			
+			capture.stop
+			
+			# Ensure GC is enabled before calling each_object
+			GC.enable
+			expect(gc_enabled?).to be == true
+			
+			# Call each_object (which temporarily disables GC)
+			capture.each_object(Hash) do |object, allocations|
+				# Do nothing, just iterate
+			end
+			
+			# Verify GC is re-enabled after each_object completes
+			expect(gc_enabled?).to be == true
+		end
+		
+		it "re-enables GC even if exception is raised during iteration" do
+			capture.track(Hash)
+			capture.start
+			
+			# Allocate some objects
+			5.times{Hash.new}
+			
+			capture.stop
+			
+			# Ensure GC is enabled before calling each_object
+			GC.enable
+			expect(gc_enabled?).to be == true
+			
+			# Call each_object and raise an exception during iteration
+			begin
+				capture.each_object(Hash) do |object, allocations|
+					raise "test exception"
+				end
+			rescue => e
+				expect(e.message).to be == "test exception"
+			end
+			
+			# Verify GC is re-enabled even after exception
+			expect(gc_enabled?).to be == true
+		end
+		
+		it "preserves GC state if GC was disabled before each_object" do
+			capture.track(Hash)
+			capture.start
+			
+			# Allocate some objects
+			5.times{Hash.new}
+			
+			capture.stop
+			
+			# Disable GC before calling each_object
+			GC.disable
+			expect(gc_enabled?).to be == false
+			
+			# Call each_object (which temporarily disables GC, but it was already disabled)
+			capture.each_object(Hash) do |object, allocations|
+				# Do nothing, just iterate
+			end
+			
+			# Verify GC remains disabled (since it was disabled before)
+			expect(gc_enabled?).to be == false
+		ensure
+			# Re-enable GC for other tests
+			GC.enable
+		end
+	end
 end
