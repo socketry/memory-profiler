@@ -1,6 +1,6 @@
 # Releases
 
-## Unreleased
+## v1.6.3
 
   - Fix GC handling during `each_object` (it was incorrectly inverted).
 

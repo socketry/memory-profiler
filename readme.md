@@ -22,6 +22,10 @@ Please see the [project documentation](https://socketry.github.io/memory-profile
 
 Please see the [project releases](https://socketry.github.io/memory-profiler/releases/index) for all releases.
 
+### v1.6.3
+
+  - Fix GC handling during `each_object` (it was incorrectly inverted).
+
 ### v1.6.2
 
   - Ensure all `FREEOBJ` events are enqueued.
@@ -74,10 +78,6 @@ Please see the [project releases](https://socketry.github.io/memory-profiler/rel
 ### v1.1.15
 
   - Ignore `freeobj` for classes that are not being tracked.
-
-### v1.1.14
-
-  - Ignore `freeobj` events for objects with anonymous classes that are not tracked (and thus become `T_NONE`).
 
 ## Contributing
 
