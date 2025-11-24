@@ -1,5 +1,13 @@
 # Releases
 
+## Unreleased
+
+  - Add `track_all` option to `Sampler`.
+
+## v1.6.0
+
+  - Add `Capture#track_all` which defaults to false.
+
 ## v1.5.1
 
   - Improve performance of object table.
