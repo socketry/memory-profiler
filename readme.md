@@ -22,6 +22,11 @@ Please see the [project documentation](https://socketry.github.io/memory-profile
 
 Please see the [project releases](https://socketry.github.io/memory-profiler/releases/index) for all releases.
 
+### v1.6.2
+
+  - Ensure all `FREEOBJ` events are enqueued.
+  - Allow limited re-entrancy in queue processing.
+
 ### v1.6.1
 
   - Add `track_all` option to `Sampler`.
@@ -73,11 +78,6 @@ Please see the [project releases](https://socketry.github.io/memory-profiler/rel
 ### v1.1.14
 
   - Ignore `freeobj` events for objects with anonymous classes that are not tracked (and thus become `T_NONE`).
-
-### v1.1.13
-
-  - Fix sampler loop interval handling.
-  - Log capture statistics from sampler run loop.
 
 ## Contributing
 

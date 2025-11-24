@@ -1,6 +1,6 @@
 # Releases
 
-## Unreleased
+## v1.6.2
 
   - Ensure all `FREEOBJ` events are enqueued.
   - Allow limited re-entrancy in queue processing.
