@@ -22,6 +22,14 @@ Please see the [project documentation](https://socketry.github.io/memory-profile
 
 Please see the [project releases](https://socketry.github.io/memory-profiler/releases/index) for all releases.
 
+### v1.6.1
+
+  - Add `track_all` option to `Sampler`.
+
+### v1.6.0
+
+  - Add `Capture#track_all` which defaults to false.
+
 ### v1.5.1
 
   - Improve performance of object table.
@@ -70,14 +78,6 @@ Please see the [project releases](https://socketry.github.io/memory-profiler/rel
 
   - Fix sampler loop interval handling.
   - Log capture statistics from sampler run loop.
-
-### v1.1.12
-
-  - Use `rb_obj_id` for tracking object states to avoid compaction issues.
-
-### v1.1.11
-
-  - Double buffer shared events queues to fix queue corruption.
 
 ## Contributing
 

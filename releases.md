@@ -1,6 +1,6 @@
 # Releases
 
-## Unreleased
+## v1.6.1
 
   - Add `track_all` option to `Sampler`.
 
