@@ -19,6 +19,9 @@ struct Memory_Profiler_Events {
 	// Double-buffered event queues (contains events from all Capture instances).
 	struct Memory_Profiler_Queue queues[2];
 	struct Memory_Profiler_Queue *available, *processing;
+	
+	// Guard flag to prevent recursive processing (0 = not processing, 1 = processing)
+	int processing_flag;
 
 	// Postponed job handle for processing the queue.
 	// Postponed job handles are an extremely limited resource, so we only register one global event queue.
@@ -59,6 +62,7 @@ static VALUE Memory_Profiler_Events_new(void) {
 	// Start with queues[0] available for incoming events, queues[1] for processing (initially empty):
 	events->available = &events->queues[0];
 	events->processing = &events->queues[1];
+	events->processing_flag = 0;
 	
 	// Pre-register the single postponed job for processing the queue:
 	events->postponed_job_handle = rb_postponed_job_preregister(0,
@@ -85,8 +89,6 @@ struct Memory_Profiler_Events* Memory_Profiler_Events_instance(void) {
 		
 		// Pin the global events object so it's never GC'd:
 		rb_gc_register_mark_object(instance);
-		
-		if (DEBUG) fprintf(stderr, "Global event queue system initialized and pinned\n");
 		
 		TypedData_Get_Struct(instance, struct Memory_Profiler_Events, &Memory_Profiler_Events_type, events);
 	}
@@ -195,14 +197,16 @@ int Memory_Profiler_Events_enqueue(
 		RB_OBJ_WRITE(events->self, &event->klass, klass);
 		RB_OBJ_WRITE(events->self, &event->object, object);
 		
-		if (DEBUG) fprintf(stderr, "Queued %s to available queue, size: %zu\n", 
-			Memory_Profiler_Event_Type_name(type), events->available->count);
+		if (DEBUG) {
+			fprintf(stderr, "[EVENTS] Enqueued %s: object=%p available_count=%zu processing_flag=%d\n", 
+				Memory_Profiler_Event_Type_name(type), (void*)object, events->available->count, events->processing_flag);
+		}
 		
 		rb_postponed_job_trigger(events->postponed_job_handle);
 		// Success:
 		return 1;
 	}
-
+	
 	// Queue full:
 	return 0;
 }
@@ -211,6 +215,12 @@ int Memory_Profiler_Events_enqueue(
 // Public API function - called from Capture stop() to ensure all events are processed.
 void Memory_Profiler_Events_process_all(void) {
 	struct Memory_Profiler_Events *events = Memory_Profiler_Events_instance();
+	
+	// Explicitly prevent re-entrancy here:
+	if (events->processing_flag) {
+		rb_raise(rb_eRuntimeError, "Recursive call detected!");
+	}
+	
 	Memory_Profiler_Events_process_queue((void *)events);
 }
 
@@ -228,16 +238,38 @@ static VALUE Memory_Profiler_Events_process_event_protected(VALUE arg) {
 static void Memory_Profiler_Events_process_queue(void *arg) {
 	struct Memory_Profiler_Events *events = (struct Memory_Profiler_Events *)arg;
 	
+	// Check for recursive call - this would break double buffering!
+	if (events->processing_flag) {
+		// Explicitly allow re-entrancy here, as the postponed job could be triggered during `process_all`.
+		return;
+	}
+	
+	// Set processing flag to prevent recursion
+	events->processing_flag = 1;
+	
+	if (DEBUG) {
+		fprintf(stderr, "[EVENTS] process_queue START: available_count=%zu processing_count=%zu\n",
+			events->available->count, events->processing->count);
+	}
+	
 	// Swap the queues: available becomes processing, and the old processing queue (now empty) becomes available. This allows new events to continue enqueueing to the new available queue while we process.
 	struct Memory_Profiler_Queue *queue_to_process = events->available;
 	events->available = events->processing;
 	events->processing = queue_to_process;
 	
-	if (DEBUG) fprintf(stderr, "Processing event queue: %zu events\n", events->processing->count);
+	if (DEBUG) {
+		fprintf(stderr, "[EVENTS] Queues swapped: processing_count=%zu (was available), available_count=%zu (was processing)\n",
+			events->processing->count, events->available->count);
+	}
 
 	// Process all events in order (maintains NEWOBJ before FREEOBJ for same object):
 	for (size_t i = 0; i < events->processing->count; i++) {
 		struct Memory_Profiler_Event *event = Memory_Profiler_Queue_at(events->processing, i);
+		
+		if (DEBUG) {
+			fprintf(stderr, "[EVENTS] Processing event[%zu]: type=%s object=%p capture=%p\n",
+				i, Memory_Profiler_Event_Type_name(event->type), (void*)event->object, (void*)event->capture);
+		}
 		
 		// Process event with rb_protect to catch any exceptions:
 		int state = 0;
@@ -249,6 +281,11 @@ static void Memory_Profiler_Events_process_queue(void *arg) {
 			rb_set_errinfo(Qnil);
 		}
 		
+		if (DEBUG) {
+			fprintf(stderr, "[EVENTS] Processed event[%zu]: type=%s object=%p (exception=%d)\n",
+				i, Memory_Profiler_Event_Type_name(event->type), (void*)event->object, state);
+		}
+		
 		// Clear this event after processing to prevent marking stale data if GC runs:
 		event->type = MEMORY_PROFILER_EVENT_TYPE_NONE;
 		RB_OBJ_WRITE(events->self, &event->capture, Qnil);
@@ -256,6 +293,16 @@ static void Memory_Profiler_Events_process_queue(void *arg) {
 		RB_OBJ_WRITE(events->self, &event->object, Qnil);
 	}
 	
+	// Save count before clearing for logging
+	size_t processed_count = events->processing->count;
+	
 	// Clear the processing queue (which is now empty logically):
 	Memory_Profiler_Queue_clear(events->processing);
+	
+	// Clear processing flag
+	events->processing_flag = 0;
+	
+	if (DEBUG) {
+		fprintf(stderr, "[EVENTS] process_queue END: processed %zu events\n", processed_count);
+	}
 }

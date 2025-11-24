@@ -1,5 +1,10 @@
 # Releases
 
+## Unreleased
+
+  - Ensure all `FREEOBJ` events are enqueued.
+  - Allow limited re-entrancy in queue processing.
+
 ## v1.6.1
 
   - Add `track_all` option to `Sampler`.

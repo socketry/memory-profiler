@@ -365,7 +365,7 @@ void Memory_Profiler_Object_Table_compact(struct Memory_Profiler_Object_Table *t
 	table->count = 0;
 	table->tombstones = 0;  // Compaction clears tombstones
 	
-	// Reinsert all entries with new hash values
+	// Reinsert all entries with new hash values:
 	for (size_t i = 0; i < temp_count; i++) {
 		int found;
 		size_t index = find_entry(table->entries, table->capacity, temp_entries[i].object, &found, NULL, "compact");

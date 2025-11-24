@@ -13,6 +13,9 @@
 
 enum {
 	DEBUG = 0,
+
+	// This generates a lot of output:
+	DEBUG_EVENT = 0,
 };
 
 static VALUE Memory_Profiler_Capture = Qnil;
@@ -224,10 +227,7 @@ static void Memory_Profiler_Capture_process_freeobj(VALUE capture_value, VALUE u
 	struct Memory_Profiler_Object_Table_Entry *entry = Memory_Profiler_Object_Table_lookup(capture->states, object);
 	
 	if (!entry) {
-		if (DEBUG) fprintf(stderr, "[FREEOBJ] Object not found in table: %p\n", (void*)object);
 		goto done;
-	} else {
-		if (DEBUG) fprintf(stderr, "[FREEOBJ] Object found in table: %p\n", (void*)object);
 	}
 	
 	VALUE klass = entry->klass;
@@ -246,7 +246,7 @@ static void Memory_Profiler_Capture_process_freeobj(VALUE capture_value, VALUE u
 	Memory_Profiler_Object_Table_delete_entry(capture->states, entry);
 	
 	struct Memory_Profiler_Capture_Allocations *record = Memory_Profiler_Allocations_get(allocations);
-	
+
 	// Increment global free count
 	capture->free_count++;
 	
@@ -323,13 +323,12 @@ static void Memory_Profiler_Capture_event_callback(VALUE self, void *ptr) {
 	TypedData_Get_Struct(self, struct Memory_Profiler_Capture, &Memory_Profiler_Capture_type, capture);
 	
 	VALUE object = rb_tracearg_object(trace_arg);
-	
-	// We don't want to track internal non-Object allocations:
-	if (!Memory_Profiler_Capture_trackable_p(object)) return;
-	
 	rb_event_flag_t event_flag = rb_tracearg_event_flag(trace_arg);
 	
 	if (event_flag == RUBY_INTERNAL_EVENT_NEWOBJ) {
+		// We don't want to track internal non-Object allocations:
+		if (!Memory_Profiler_Capture_trackable_p(object)) return;
+		
 		// Skip NEWOBJ if disabled (during callback) to prevent infinite recursion
 		if (capture->paused) return;
 		
@@ -338,12 +337,10 @@ static void Memory_Profiler_Capture_event_callback(VALUE self, void *ptr) {
 		// Skip if klass is not a Class
 		if (rb_type(klass) != RUBY_T_CLASS) return;
 		
-		// Enqueue actual object (not object_id) - queue retains it until processed
-		// Ruby 3.5 compatible: no need for FL_SEEN_OBJ_ID or rb_obj_id
-		if (DEBUG) fprintf(stderr, "[NEWOBJ] Enqueuing event for object: %p\n", (void*)object);
+		if (DEBUG_EVENT) fprintf(stderr, "[NEWOBJ] Enqueuing event for object: %p\n", (void*)object);
 		Memory_Profiler_Events_enqueue(MEMORY_PROFILER_EVENT_TYPE_NEWOBJ, self, klass, object);
 	} else if (event_flag == RUBY_INTERNAL_EVENT_FREEOBJ) {
-		if (DEBUG) fprintf(stderr, "[FREEOBJ] Enqueuing event for object: %p\n", (void*)object);
+		if (DEBUG_EVENT) fprintf(stderr, "[FREEOBJ] Enqueuing event for object: %p\n", (void*)object);
 		Memory_Profiler_Events_enqueue(MEMORY_PROFILER_EVENT_TYPE_FREEOBJ, self, Qnil, object);
 	}
 }
@@ -596,12 +593,19 @@ struct Memory_Profiler_Each_Object_Arguments {
 	
 	// The allocations wrapper to filter by (Qnil = no filter).
 	VALUE allocations;
+	
+	// Previous GC state (to restore in ensure handler)
+	int gc_was_enabled;
 };
 
-// Cleanup function to re-enable GC
+// Cleanup function to restore GC state
 static VALUE Memory_Profiler_Capture_each_object_ensure(VALUE arg) {
-	// Re-enable GC (rb_gc_enable returns previous state, but we don't need it)
-	rb_gc_enable();
+	struct Memory_Profiler_Each_Object_Arguments *arguments = (struct Memory_Profiler_Each_Object_Arguments *)arg;
+	
+	// Restore GC state only if it was enabled before
+	if (arguments->gc_was_enabled) {
+		rb_gc_enable();
+	}
 	
 	return Qnil;
 }
@@ -619,8 +623,8 @@ static VALUE Memory_Profiler_Capture_each_object_body(VALUE arg) {
 		for (size_t i = 0; i < capture->states->capacity; i++) {
 			struct Memory_Profiler_Object_Table_Entry *entry = &capture->states->entries[i];
 			
-			// Skip empty or deleted slots (0 = not set)
-			if (entry->object == 0) {
+			// Skip empty or deleted slots (0 = not set, Qnil = deleted)
+			if (entry->object == 0 || entry->object == Qnil) {
 				continue;
 			}
 			
@@ -661,13 +665,6 @@ static VALUE Memory_Profiler_Capture_each_object(int argc, VALUE *argv, VALUE se
 	
 	RETURN_ENUMERATOR(self, argc, argv);
 	
-	// Disable GC to prevent objects from being collected during iteration
-	rb_gc_disable();
-	
-	// Process all pending events to clean up stale entries
-	// At this point, all remaining objects in the table should be valid
-	Memory_Profiler_Events_process_all();
-	
 	// If class provided, look up its allocations wrapper
 	VALUE allocations = Qnil;
 	if (!NIL_P(klass)) {
@@ -675,17 +672,24 @@ static VALUE Memory_Profiler_Capture_each_object(int argc, VALUE *argv, VALUE se
 		if (st_lookup(capture->tracked, (st_data_t)klass, &allocations_data)) {
 			allocations = (VALUE)allocations_data;
 		} else {
-			// Class not tracked - nothing to iterate
-			// Re-enable GC before returning
-			rb_gc_enable();
+			// Class not tracked - nothing to iterate:
 			return self;
 		}
 	}
+
+	// Disable GC to prevent objects from being collected during iteration
+	// rb_gc_disable returns the previous state (non-zero = was enabled, 0 = was disabled)
+	int gc_was_enabled = RTEST(rb_gc_disable());
+	
+	// Process all pending events to clean up stale entries:
+	Memory_Profiler_Events_process_all();
+	// At this point, all remaining objects in the table should be valid.
 	
 	// Setup arguments for iteration
 	struct Memory_Profiler_Each_Object_Arguments arguments = {
 		.self = self,
-		.allocations = allocations
+		.allocations = allocations,
+		.gc_was_enabled = gc_was_enabled
 	};
 	
 	// Use rb_ensure to guarantee cleanup even if exception is raised
